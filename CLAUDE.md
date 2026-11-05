@@ -89,6 +89,17 @@ Checked in the Wine source (`C:\vcs\github.com\wine-mirror\wine`, Wine 11.21,
   not. For those, allocate memory in the target with `VirtualAllocEx`, then
   use `WriteProcessMemory`, `SendMessage` and `ReadProcessMemory`, as NVDA
   does.
+- UI Automation adds nothing over MSAA for standard controls. No Wine
+  control implements a UIA provider (no `IRawElementProviderSimple` or
+  `UiaReturnRawElementProvider` in `comctl32`, `user32`, `win32u`).
+  `uiautomationcore` wraps the MSAA object
+  (`create_msaa_provider` in `uia_provider.c`), adds the base HWND
+  properties, and the only pattern it offers is `LegacyIAccessible`
+  (no `Text`, `Value`, `Selection`, ...).
+- UIA is useful for programs that implement their own provider and answer
+  `WM_GETOBJECT` with `UiaRootObjectId` (Qt, Chromium/Electron, WPF and
+  similar). For those the Wine UIA client should deliver the program's real
+  tree, text and patterns. Not verified yet.
 
 ## Verified by experiment
 
@@ -119,6 +130,12 @@ Wine 11.21, 2026-11-05).
 
 - How good are Wine's `oleacc` proxies for the other standard controls
   (list views, tree views, combo boxes, dialogs)?
+- Does the Wine UIA client work across processes with a program that has
+  its own UIA provider (tree, `TextPattern`, focus and property-change
+  events)? Plan: write a small test program that implements
+  `IRawElementProviderSimple` (and a `TextPattern`) and answers
+  `WM_GETOBJECT` / `UiaRootObjectId`, then read it from the probe through
+  `IUIAutomation`.
 
 ## Winelib pitfalls
 
