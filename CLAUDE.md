@@ -90,13 +90,51 @@ Checked in the Wine source (`C:\vcs\github.com\wine-mirror\wine`, Wine 11.21,
   use `WriteProcessMemory`, `SendMessage` and `ReadProcessMemory`, as NVDA
   does.
 
+## Verified by experiment
+
+Found with `probe` against Wine's notepad (`tests/probe-notepad.sh`,
+Wine 11.21, 2026-11-05).
+
+- `GetGUIThreadInfo` on a thread of another process works: it returns
+  `hwndFocus`, `hwndCaret` and the caret rectangle, and in menu mode
+  `GUI_INMENUMODE` with `hwndMenuOwner`.
+- `EM_GETSEL`, `EM_LINEFROMCHAR`, `EM_LINEINDEX`, `EM_LINELENGTH` and
+  `EM_GETLINE` on an `Edit` of another process give the caret line and
+  column correctly. Notepad's `Edit` emits `EVENT_OBJECT_VALUECHANGE` on
+  `OBJID_CLIENT` for every typed character.
+- Menus cannot be read from another process:
+  - the popup is a visible top-level `#32768` window and `MN_GETHMENU`
+    returns its `HMENU`, but `GetMenuItemCount` / `GetMenuItemInfo` on that
+    handle (and on `GetMenu` of the owner) fail with error 1400;
+  - MSAA does not help: `AccessibleObjectFromWindow(owner, OBJID_MENU)`
+    returns `E_NOTIMPL` and the popup's `OBJID_CLIENT` has no children;
+  - the only WinEvents are `EVENT_SYSTEM_CAPTURESTART/END` on the owner and
+    create/show/hide/destroy of the `#32768` window.
+
+  Menus therefore need code inside the target process (a hook DLL).
+- MSAA for focus events works for `Edit` (role text, states) and the main
+  window client (name = window title).
+
 ## Open questions (to verify by experiment)
 
-- Does `GetGUIThreadInfo` return the caret rectangle of another process
-  under Wine?
-- Menus: is `HMENU` from `MN_GETHMENU` usable from another process, and can
-  the highlighted item be found with `GetMenuItemInfo` (`MFS_HILITE`)?
-- How good are Wine's `oleacc` proxies for standard controls in practice?
+- How good are Wine's `oleacc` proxies for the other standard controls
+  (list views, tree views, combo boxes, dialogs)?
+
+## Winelib pitfalls
+
+- Win32 modules are built with `-mno-cygwin` (Wine's msvcrt headers). In
+  the resulting ELF both `msvcrt` and `ucrtbase` get loaded, and `wmain`
+  then receives a broken `argv`. Use `main` with `GetCommandLineW` and
+  `CommandLineToArgvW`, and write output with `WriteFile` instead of CRT
+  stdio.
+- On x86_64 `va_list` is the ms_abi one. A variadic function that passes
+  its `va_list` to Win32 (`wvsprintfW`) must be declared `WINAPIV`,
+  otherwise it crashes.
+- Wine's `libuuid` lacks `IID_IAccessible`; include `<initguid.h>` before
+  `<oleacc.h>` in one source file.
+- In the test prefix the crash dialog is off
+  (`HKCU\Software\Wine\WineDbg\ShowCrashDialog=0`); backtraces go to the
+  terminal.
 
 ## Environment
 
