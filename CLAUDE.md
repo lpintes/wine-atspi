@@ -119,6 +119,12 @@ Checked in the Wine source (`C:\vcs\github.com\wine-mirror\wine`, Wine 11.21,
 - **Keep the Wine version identical** in WSL and in the image
   (`pacman -Q wine` on both). A Winelib binary is tied to the Wine it was
   built against. As of 2026-11-05 both are at 11.21.
+- `sudo` in Arch WSL asks for a password. For package management run
+  `wsl.exe -d archlinux -u root -- ...` instead.
+- Upgrading the mounted image through `arch-chroot /mnt/arch` works but is
+  slow (about 20 minutes for 300 packages), because the image sits on NTFS
+  behind the WSL file bridge. Prefer upgrading inside the VM
+  (`C:\linux\run.sh -w`).
 - From Git Bash, `export MSYS_NO_PATHCONV=1` before passing Linux paths to
   `wsl.exe`.
 
