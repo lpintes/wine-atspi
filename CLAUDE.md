@@ -140,6 +140,26 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   `/org/a11y/atspi/accessible/root`, then `org.a11y.atspi.Socket.Embed`
   on `org.a11y.atspi.Registry`. `python-atspi` then lists the application
   with its name and toolkit.
+- One GDBus connection per Wine process, each with
+  `g_dbus_connection_register_subtree` on `/org/a11y/atspi/accessible`,
+  gives one AT-SPI application per process. python-atspi receives
+  `object:state-changed:focused`, `window:activate` and
+  `object:children-changed` with signal signature `(siiva{sv})`
+  (`tests/bridge-notepad.sh`, `tests/atspi-events.py`).
+- The Win32 thread hands snapshots to the AT-SPI thread with a GLib idle
+  source attached to the AT-SPI thread's `GMainContext`; no separate
+  queue or lock is needed.
+- Wine notifies `EVENT_OBJECT_FOCUS` for a window before sending it
+  `WM_SETFOCUS` (`win32u/input.c`, `set_focus_window`), but the
+  out-of-context event for the parent arrives *after* the child's when
+  the handler moves focus on (notepad: Edit, then the main window). The
+  bridge drops a window focus event when `GetGUIThreadInfo().hwndFocus`
+  is another window.
+- Wine's `oleacc` has no proxy for `Button` or `ComboBox`: both report
+  `ROLE_SYSTEM_CLIENT`. The bridge falls back to a role from the window
+  class and style. A combo box's MSAA name is its current text, and the
+  file name `Edit` of the Open dialog has no name: labels from a
+  preceding `Static` are not picked up.
 - `atspi.c` uses only GLib functions, never libc ones directly. The
   binary imports msvcrt through Wine, and a libc name could bind to an
   ms_abi msvcrt thunk. Not proven to break, just avoided.

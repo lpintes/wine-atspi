@@ -13,9 +13,11 @@ from gi.repository import Atspi  # noqa: E402
 
 
 def describe(obj):
-    return "%s [%s] %r" % (obj.get_role_name(), obj.get_toolkit_name()
-                           if obj.get_role() == Atspi.Role.APPLICATION
-                           else "", obj.get_name())
+    if obj.get_role() == Atspi.Role.APPLICATION:
+        extra = obj.get_toolkit_name()
+    else:
+        extra = (obj.get_attributes() or {}).get("class", "")
+    return "%s [%s] %r" % (obj.get_role_name(), extra, obj.get_name())
 
 
 def dump(obj, depth):

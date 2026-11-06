@@ -27,7 +27,8 @@ $(BUILD)/main.o: bridge/main.c bridge/bridge.h | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -c -o $@ $<
 
 $(BUILD)/wine-atspi.exe.so: $(BUILD)/main.o $(BUILD)/atspi.o
-	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/wine-atspi.exe $^ $(GIO_LIBS)
+	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/wine-atspi.exe $^ $(GIO_LIBS) \
+		-loleacc -lole32 -loleaut32
 
 $(BUILD)/probe.exe.so: probe/probe.c | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/probe.exe $< \

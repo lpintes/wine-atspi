@@ -1,0 +1,34 @@
+#!/bin/bash
+# Run the bridge against Wine's notepad and log the AT-SPI events it emits.
+# Usage: tests/bridge-notepad.sh [LOG]   (run from the repository root in WSL)
+# The bridge's own stderr goes to build/bridge.log.
+
+set -u
+export WINEPREFIX=${WINEPREFIX:-$HOME/.wine-atspi}
+export WINEDEBUG=${WINEDEBUG:--all}
+LOG=${1:-build/bridge-notepad.log}
+BUILD=build
+
+wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
+bridge=$!
+sleep 2
+python3 tests/atspi-events.py 25 > "$LOG" 2>&1 &
+events=$!
+sleep 1
+wine notepad &
+sleep 3
+
+# Ctrl+O opens the Open dialog; Tab moves through its controls. The
+# dialog is opened twice: once closed, it must leave the tree.
+timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \
+    t:"Hello" w:300 \
+    k:ctrl+o w:1500 k:tab w:500 k:tab w:500 k:tab w:500 \
+    k:escape w:1000 t:" world" w:500 \
+    k:ctrl+o w:3000 k:escape w:1000
+
+wait $events
+python3 tests/atspi-dump.py notepad >> "$LOG" 2>&1
+kill $bridge
+wineserver -k
+wait
+echo "log: $LOG"
