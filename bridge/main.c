@@ -16,12 +16,36 @@
 
 #define NAME_MAX_UTF8 1024
 
+static BOOL debug;
+
+/* Writes a line to stderr when WINE_ATSPI_DEBUG is set. */
+static void WINAPIV trace(const WCHAR *format, ...)
+{
+    WCHAR buf[1024];
+    char utf8[3072];
+    va_list args;
+    DWORD written;
+    int len;
+
+    if (!debug)
+        return;
+    va_start(args, format);
+    wvsprintfW(buf, format, args);
+    va_end(args);
+    len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, utf8, sizeof(utf8) - 1, NULL, NULL);
+    if (len <= 0)
+        return;
+    utf8[len - 1] = '\n';
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), utf8, len, &written, NULL);
+}
+
 /* UTF-8 buffers backing the strings of one bridge_focus. */
 struct focus_strings
 {
     char app[MAX_PATH * 3];
     char frame[NAME_MAX_UTF8];
     char object[NAME_MAX_UTF8];
+    char value[NAME_MAX_UTF8];
     char frame_class[256 * 3];
     char object_class[256 * 3];
 };
@@ -273,6 +297,7 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         name = NULL;
     to_utf8(name, str->object, sizeof(str->object));
     obj->name = str->object;
+    obj->value = NULL;
     VariantInit(&role);
     IAccessible_get_accRole(acc, child, &role);
     obj->role = BRIDGE_ROLE_UNKNOWN;
@@ -291,6 +316,17 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         obj->role = BRIDGE_ROLE_PANEL;
     if (obj->role == BRIDGE_ROLE_TEXT)
         refine_text(hwnd, msaa_state, obj);
+    if (obj->role == BRIDGE_ROLE_COMBO_BOX)
+    {
+        /*
+         * Wine's oleacc names a combo box by its current text. Orca reads a
+         * combo box value from "valuetext" and ignores name changes of a
+         * focused combo box, so the text is the value, not the name.
+         */
+        lstrcpyA(str->value, str->object);
+        obj->value = str->value;
+        str->object[0] = 0;
+    }
 
     SysFreeString(name);
     VariantClear(&role);
@@ -338,6 +374,15 @@ static BOOL is_stale_focus(HWND hwnd, LONG id_object, LONG id_child)
     return gti.hwndFocus && gti.hwndFocus != hwnd;
 }
 
+/* The object of the last focus event, checked again after each key. */
+static struct
+{
+    HWND hwnd;
+    LONG id_object;
+    LONG id_child;
+    DWORD pid;
+} last_focus;
+
 static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 {
     struct bridge_focus focus;
@@ -358,6 +403,81 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     get_app_name(pid, str.app, sizeof(str.app));
     focus.app_name = str.app;
     atspi_post_focus(&focus);
+    trace(L"focus: %p %ld %ld name \"%S\"", hwnd, id_object, id_child, focus.object.name);
+
+    last_focus.hwnd = hwnd;
+    last_focus.id_object = id_object;
+    last_focus.id_child = id_child;
+    last_focus.pid = pid;
+}
+
+/*
+ * Wine's ListBox moves its caret on arrow keys without a focus event
+ * (listbox.c, LISTBOX_HandleKeyDown). Reports the new item as focused;
+ * FALSE if hwnd is no list box or the caret did not move.
+ */
+static BOOL check_list_caret(HWND hwnd)
+{
+    WCHAR cls[256];
+    DWORD_PTR caret = LB_ERR;
+
+    if (last_focus.id_object != OBJID_CLIENT || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
+        (lstrcmpiW(cls, L"ListBox") && lstrcmpiW(cls, L"ComboLBox")))
+        return FALSE;
+    if (!SendMessageTimeoutW(hwnd, LB_GETCARETINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &caret) ||
+        (LONG)caret == LB_ERR || (LONG)caret + 1 == last_focus.id_child)
+        return FALSE;
+    on_focus(hwnd, OBJID_CLIENT, (LONG)caret + 1);
+    return TRUE;
+}
+
+/*
+ * Wine emits no WinEvent when a key changes a combo box, a list box
+ * selection or a user32 Edit. Like NVDA, look at the focused object again
+ * shortly after each key, once the target has handled it.
+ */
+#define KEY_CHECK_DELAY_MS 50
+
+static UINT_PTR key_timer;
+
+static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
+{
+    struct bridge_object obj;
+    struct focus_strings str;
+    GUITHREADINFO gti;
+    HWND hwnd = last_focus.hwnd;
+
+    KillTimer(NULL, id);
+    key_timer = 0;
+    if (!hwnd || !IsWindow(hwnd))
+        return;
+    memset(&gti, 0, sizeof(gti));
+    gti.cbSize = sizeof(gti);
+    /* Focus moved elsewhere: its own focus event will tell. */
+    if (!GetGUIThreadInfo(GetWindowThreadProcessId(hwnd, NULL), &gti) || gti.hwndFocus != hwnd)
+    {
+        trace(L"key check: focus %p is not %p", gti.hwndFocus, hwnd);
+        return;
+    }
+    if (check_list_caret(hwnd))
+        return;
+    memset(&obj, 0, sizeof(obj));
+    if (!describe_object(hwnd, last_focus.id_object, last_focus.id_child, &obj, &str))
+        return;
+    trace(L"key check: %p %ld %ld name \"%S\" value \"%S\"", hwnd, last_focus.id_object,
+          last_focus.id_child, obj.name, obj.value ? obj.value : "");
+    atspi_post_update(last_focus.pid, &obj);
+}
+
+static LRESULT CALLBACK keyboard_proc(int code, WPARAM wparam, LPARAM lparam)
+{
+    /* The key has not reached the target yet; check after a short delay. */
+    if (code == HC_ACTION && (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN))
+    {
+        trace(L"key %lu", ((KBDLLHOOKSTRUCT *)lparam)->vkCode);
+        key_timer = SetTimer(NULL, key_timer, KEY_CHECK_DELAY_MS, check_after_key);
+    }
+    return CallNextHookEx(NULL, code, wparam, lparam);
 }
 
 static void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
@@ -393,9 +513,11 @@ static DWORD WINAPI atspi_thread(void *arg)
 int main(void)
 {
     HWINEVENTHOOK hook;
+    HHOOK keyboard;
     HANDLE thread;
     MSG msg;
 
+    debug = GetEnvironmentVariableW(L"WINE_ATSPI_DEBUG", NULL, 0) > 0;
     if (atspi_init())
         return 1;
     thread = CreateThread(NULL, 0, atspi_thread, NULL, 0, NULL);
@@ -409,12 +531,16 @@ int main(void)
                            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     if (!hook)
         return 1;
+    keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, GetModuleHandleW(NULL), 0);
+    if (!keyboard)
+        return 1;
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0)
     {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    UnhookWindowsHookEx(keyboard);
     UnhookWinEvent(hook);
     CoUninitialize();
     return 0;

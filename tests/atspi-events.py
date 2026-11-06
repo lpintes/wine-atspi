@@ -14,10 +14,10 @@ gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi, GLib  # noqa: E402
 
 EVENTS = [
-    "object:state-changed:focused",
-    "object:state-changed:active",
+    "object:state-changed",
     "object:children-changed",
     "object:property-change:accessible-name",
+    "object:selection-changed",
     "window:activate",
     "window:deactivate",
 ]
@@ -25,7 +25,11 @@ EVENTS = [
 
 def describe(obj):
     try:
-        return "%s %r" % (obj.get_role_name(), obj.get_name())
+        text = "%s %r" % (obj.get_role_name(), obj.get_name())
+        value = (obj.get_attributes() or {}).get("valuetext")
+        if value is not None:
+            text += " value=%r" % value
+        return text
     except GLib.Error as e:
         return "<%s>" % e.message
 
@@ -40,6 +44,9 @@ def chain(obj):
 
 
 def on_event(event, toolkit):
+    # libatspi itself reports defunct states while it looks objects up.
+    if event.type == "object:state-changed:defunct":
+        return
     try:
         app = event.source.get_application()
         if app is None or app.get_toolkit_name() != toolkit:

@@ -92,6 +92,7 @@ struct bridge_object
     unsigned int role;          /* enum bridge_role */
     unsigned long long states;  /* BRIDGE_STATE_BIT of enum bridge_state */
     const char *name;           /* may be NULL */
+    const char *value;          /* current value, e.g. a combo box text; may be NULL */
     const char *window_class;   /* GetClassName of hwnd, may be NULL */
 };
 
@@ -115,6 +116,13 @@ void atspi_run(void);
 
 /* Reports a focus change. Copies everything; callable from any thread. */
 void atspi_post_focus(const struct bridge_focus *focus);
+
+/*
+ * Reports a fresh look at an object of process pid, e.g. after a key
+ * press: a changed name or state is announced. Objects not in the model
+ * are ignored. Copies everything; callable from any thread.
+ */
+void atspi_post_update(unsigned int pid, const struct bridge_object *object);
 
 /*
  * Reports that window hwnd was hidden or destroyed: every object of that

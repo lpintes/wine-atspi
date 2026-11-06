@@ -73,6 +73,7 @@ struct node
     guint32 role;
     guint64 states;
     char *name;
+    char *value;
     char *window_class;
 };
 
@@ -176,16 +177,37 @@ static void emit(struct node *node, const char *iface, const char *member,
         NULL);
 }
 
+/* The detail string of StateChanged; NULL for states never announced. */
+static const char *state_name(guint state)
+{
+    switch (state)
+    {
+    case BRIDGE_STATE_ACTIVE: return "active";
+    case BRIDGE_STATE_CHECKED: return "checked";
+    case BRIDGE_STATE_EDITABLE: return "editable";
+    case BRIDGE_STATE_ENABLED: return "enabled";
+    case BRIDGE_STATE_EXPANDABLE: return "expandable";
+    case BRIDGE_STATE_EXPANDED: return "expanded";
+    case BRIDGE_STATE_FOCUSED: return "focused";
+    case BRIDGE_STATE_INDETERMINATE: return "indeterminate";
+    case BRIDGE_STATE_PRESSED: return "pressed";
+    case BRIDGE_STATE_READ_ONLY: return "read-only";
+    case BRIDGE_STATE_SELECTED: return "selected";
+    case BRIDGE_STATE_SENSITIVE: return "sensitive";
+    }
+    return NULL;
+}
+
 static void set_state(struct node *node, guint state, gboolean on)
 {
     guint64 bit = BRIDGE_STATE_BIT(state);
+    const char *name = state_name(state);
 
     if (!!(node->states & bit) == !!on)
         return;
     node->states ^= bit;
-    emit(node, EVENT_OBJECT, "StateChanged",
-         state == BRIDGE_STATE_FOCUSED ? "focused" : "active", on, 0,
-         g_variant_new_int32(0));
+    if (name)
+        emit(node, EVENT_OBJECT, "StateChanged", name, on, 0, g_variant_new_int32(0));
 }
 
 static void method_call(GDBusConnection *conn, const char *sender,
@@ -242,6 +264,9 @@ static void method_call(GDBusConnection *conn, const char *sender,
         g_variant_builder_init(&b, G_VARIANT_TYPE("a{ss}"));
         if (node->window_class)
             g_variant_builder_add(&b, "{ss}", "class", node->window_class);
+        /* Orca takes a combo box value from here (generator.py). */
+        if (node->value)
+            g_variant_builder_add(&b, "{ss}", "valuetext", node->value);
         ret = g_variant_new("(a{ss})", &b);
     }
     else if (!g_strcmp0(method, "GetApplication"))
@@ -406,6 +431,7 @@ static void node_free(struct node *node)
     g_free(node->id);
     g_free(node->path);
     g_free(node->name);
+    g_free(node->value);
     g_free(node->window_class);
     g_free(node);
 }
@@ -430,35 +456,25 @@ static char *object_id(const struct bridge_object *obj)
                            (guint64)obj->hwnd, obj->child);
 }
 
-/* Finds or creates the node for obj below parent and updates it. */
-static struct node *get_node(struct app *app, const struct bridge_object *obj,
-                             struct node *parent)
+/* ACTIVE and FOCUSED are ours: they change only with focus events. */
+#define OWN_STATES (BRIDGE_STATE_BIT(BRIDGE_STATE_ACTIVE) | \
+                    BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED))
+
+/* Copies obj into an existing node, announcing a changed name or state. */
+static void update_node(struct node *node, const struct bridge_object *obj)
 {
-    char *id = object_id(obj);
-    struct node *node = g_hash_table_lookup(app->nodes, id);
-    guint64 keep = BRIDGE_STATE_BIT(BRIDGE_STATE_ACTIVE) |
-                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
+    guint64 changed = (node->states ^ obj->states) & ~OWN_STATES;
+    guint state;
 
-    if (!node)
-    {
-        node = node_new(app, id, parent);
-        node->role = obj->role;
-        node->states = obj->states & ~keep;
-        node->name = g_strdup(obj->name);
-        node->window_class = g_strdup(obj->window_class);
-        g_free(id);
-        return node;
-    }
-    g_free(id);
-
-    /* ACTIVE and FOCUSED are ours: they change only with events. */
     node->role = obj->role;
     if (g_strcmp0(node->window_class, obj->window_class))
     {
         g_free(node->window_class);
         node->window_class = g_strdup(obj->window_class);
     }
-    node->states = (node->states & keep) | (obj->states & ~keep);
+    for (state = 0; state < 64; state++)
+        if (changed & BRIDGE_STATE_BIT(state))
+            set_state(node, state, !!(obj->states & BRIDGE_STATE_BIT(state)));
     if (g_strcmp0(node->name, obj->name))
     {
         g_free(node->name);
@@ -466,6 +482,35 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         emit(node, EVENT_OBJECT, "PropertyChange", "accessible-name", 0, 0,
              g_variant_new_string(node->name ? node->name : ""));
     }
+    if (g_strcmp0(node->value, obj->value))
+    {
+        g_free(node->value);
+        node->value = g_strdup(obj->value);
+        /* Orca presents a focused combo box again on selection-changed. */
+        if (node->role == BRIDGE_ROLE_COMBO_BOX)
+            emit(node, EVENT_OBJECT, "SelectionChanged", "", 0, 0, g_variant_new_int32(0));
+    }
+}
+
+/* Finds or creates the node for obj below parent and updates it. */
+static struct node *get_node(struct app *app, const struct bridge_object *obj,
+                             struct node *parent)
+{
+    char *id = object_id(obj);
+    struct node *node = g_hash_table_lookup(app->nodes, id);
+
+    if (!node)
+    {
+        node = node_new(app, id, parent);
+        node->role = obj->role;
+        node->states = obj->states & ~OWN_STATES;
+        node->name = g_strdup(obj->name);
+        node->value = g_strdup(obj->value);
+        node->window_class = g_strdup(obj->window_class);
+    }
+    else
+        update_node(node, obj);
+    g_free(id);
     return node;
 }
 
@@ -588,10 +633,38 @@ static gboolean window_gone_idle(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+struct update
+{
+    guint pid;
+    struct bridge_object object;
+};
+
+static gboolean update_idle(gpointer data)
+{
+    const struct update *u = data;
+    struct app *app = g_hash_table_lookup(apps, GUINT_TO_POINTER(u->pid));
+    char *id = object_id(&u->object);
+    struct node *node = app ? g_hash_table_lookup(app->nodes, id) : NULL;
+
+    if (node)
+        update_node(node, &u->object);
+    g_free(id);
+    return G_SOURCE_REMOVE;
+}
+
 static void free_object(struct bridge_object *obj)
 {
     g_free((char *)obj->name);
+    g_free((char *)obj->value);
     g_free((char *)obj->window_class);
+}
+
+static void free_update(gpointer data)
+{
+    struct update *u = data;
+
+    free_object(&u->object);
+    g_free(u);
 }
 
 static void free_focus(gpointer data)
@@ -608,6 +681,7 @@ static void copy_object(struct bridge_object *dst, const struct bridge_object *s
 {
     *dst = *src;
     dst->name = g_strdup(src->name);
+    dst->value = g_strdup(src->value);
     dst->window_class = g_strdup(src->window_class);
 }
 
@@ -629,6 +703,15 @@ void atspi_post_focus(const struct bridge_focus *focus)
     copy_object(&f->frame, &focus->frame);
     copy_object(&f->object, &focus->object);
     post(focus_idle, f, free_focus);
+}
+
+void atspi_post_update(unsigned int pid, const struct bridge_object *object)
+{
+    struct update *u = g_new0(struct update, 1);
+
+    u->pid = pid;
+    copy_object(&u->object, object);
+    post(update_idle, u, free_update);
 }
 
 void atspi_post_window_gone(unsigned long long hwnd)

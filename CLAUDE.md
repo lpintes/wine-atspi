@@ -82,7 +82,14 @@ Checked in the Wine source (`C:\vcs\github.com\wine-mirror\wine`, Wine 11.21,
   - focus or selection in `SysListView32`, which only emits
     create/destroy/reorder;
   - anything at all from `SysTreeView32`;
-  - value change in the user32 `Edit`.
+  - value change in the user32 `Edit`;
+  - anything from `ComboBox` itself (`user32/combo.c`);
+  - keyboard navigation in `ListBox` / `ComboLBox`:
+    `LISTBOX_HandleKeyDown` -> `LISTBOX_MoveCaret` notifies nothing. The
+    listbox focus and selection events come only from a mouse click,
+    `LB_SETCURSEL` and `WM_SETFOCUS`. The bridge therefore re-reads the
+    focused object 50 ms after each key (`check_after_key` in
+    `bridge/main.c`) and asks a list box for `LB_GETCARETINDEX`.
 - Standard messages with pointers (`WM_GETTEXT`, `EM_GETLINE`, ...) are
   marshalled across processes by Wine like on Windows. Custom messages with
   pointers (`SCI_GETTEXTRANGE`, `LVM_GETITEMTEXTW`, `TVM_GETITEMW`, ...) are
@@ -164,6 +171,22 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   binary imports msvcrt through Wine, and a libc name could bind to an
   ms_abi msvcrt thunk. Not proven to break, just avoided.
 
+## Verified in Orca's source
+
+Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
+2026-11-06). Re-check after Orca upgrades.
+
+- `object:property-change:accessible-name` on the focused object is
+  presented again, **except for a combo box**, which is skipped
+  (`scripts/default.py`, `_on_name_changed`).
+- A combo box value comes from the attribute `valuetext` first, then from
+  a text child or the selected child, then from the name
+  (`generator.py`, `_get_combo_box_value`). The bridge exposes the combo
+  text as `valuetext` and leaves the name for a label.
+- `object:selection-changed` whose source is the focused combo box makes
+  Orca present the combo box again (`_on_selection_changed`). The bridge
+  emits it when the combo value changes.
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
@@ -187,6 +210,10 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   otherwise it crashes.
 - Wine's `libuuid` lacks `IID_IAccessible`; include `<initguid.h>` before
   `<oleacc.h>` in one source file.
+- `WINE_ATSPI_DEBUG=1` makes the bridge trace focus events and key checks
+  to stderr (`tests/bridge-notepad.sh` sets it; see `build/bridge.log`).
+  Non-ASCII names show as mojibake there, because `%S` uses the ANSI code
+  page.
 - In the test prefix the crash dialog is off
   (`HKCU\Software\Wine\WineDbg\ShowCrashDialog=0`); backtraces go to the
   terminal.
