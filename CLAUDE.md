@@ -126,6 +126,24 @@ Wine 11.21, 2026-11-05).
 - MSAA for focus events works for `Edit` (role text, states) and the main
   window client (name = window title).
 
+Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
+2026-11-06).
+
+- One winegcc ELF can hold both sides: `bridge/main.c` is built with
+  `winegcc -mno-cygwin`, `bridge/atspi.c` with the host `gcc` and
+  `pkg-config gio-2.0`, and `winegcc` links both with `-lgio-2.0`. A
+  thread created with `CreateThread` runs a GLib main loop and GDBus.
+- The AT-SPI side talks D-Bus directly through GDBus instead of
+  `atk-bridge`, because `atk-bridge` allows only one application per
+  process. Registration: `org.a11y.Bus.GetAddress` on the session bus,
+  a private connection to that address, objects exported at
+  `/org/a11y/atspi/accessible/root`, then `org.a11y.atspi.Socket.Embed`
+  on `org.a11y.atspi.Registry`. `python-atspi` then lists the application
+  with its name and toolkit.
+- `atspi.c` uses only GLib functions, never libc ones directly. The
+  binary imports msvcrt through Wine, and a libc name could bind to an
+  ms_abi msvcrt thunk. Not proven to break, just avoided.
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
