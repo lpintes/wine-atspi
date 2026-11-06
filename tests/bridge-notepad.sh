@@ -21,7 +21,9 @@ sleep 3
 # Typing and caret keys in the Edit must give text-changed and
 # text-caret-moved events (no WinEvent for the caret, found by the key
 # check); shift+home selects "Hello", backspace deletes it. Ctrl+O opens the Open dialog; Tab moves
-# through its controls. Down in the file type combo box must rename it.
+# through its controls; the file name entry and the file type combo box
+# must be named by their labels. Down in the file type combo box must
+# change its value.
 # The dialog is opened twice: once closed, it must leave the tree.
 # Alt+F4 must focus a button of the "save changes?" message box.
 timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \

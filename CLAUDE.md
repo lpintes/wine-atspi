@@ -164,9 +164,14 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   is another window.
 - Wine's `oleacc` has no proxy for `Button` or `ComboBox`: both report
   `ROLE_SYSTEM_CLIENT`. The bridge falls back to a role from the window
-  class and style. A combo box's MSAA name is its current text, and the
-  file name `Edit` of the Open dialog has no name: labels from a
-  preceding `Static` are not picked up.
+  class and style. A combo box's MSAA name is its current text.
+- Wine's `oleacc` names only a bare `Edit` from the preceding `Static`
+  (`edit_find_label` in `dlls/oleacc/client.c`, by `GW_HWNDPREV`). The
+  `Edit` inside a combo box (file name field of the Open dialog, inside
+  `ComboBoxEx32` after a hidden `Edit`) and other controls get no name.
+  The bridge's `find_label` does it for them: climb out of `ComboBox` /
+  `ComboBoxEx32`, skip hidden windows and empty or picture `Static`s,
+  take the nearest text `Static`, drop the `&` of the mnemonic.
 - `atspi.c` uses only GLib functions, never libc ones directly. The
   binary imports msvcrt through Wine, and a libc name could bind to an
   ms_abi msvcrt thunk. Not proven to break, just avoided.

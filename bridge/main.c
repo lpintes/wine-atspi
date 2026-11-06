@@ -373,6 +373,97 @@ static void get_class(HWND hwnd, WCHAR *cls, int len, char *dst, int size)
     to_utf8(cls, dst, size);
 }
 
+/* Roles that take their name from a label instead of their own text. */
+static BOOL needs_label(unsigned int role)
+{
+    switch (role)
+    {
+    case BRIDGE_ROLE_ENTRY:
+    case BRIDGE_ROLE_TEXT:
+    case BRIDGE_ROLE_PASSWORD_TEXT:
+    case BRIDGE_ROLE_COMBO_BOX:
+    case BRIDGE_ROLE_LIST:
+    case BRIDGE_ROLE_TREE:
+    case BRIDGE_ROLE_TABLE:
+    case BRIDGE_ROLE_SLIDER:
+    case BRIDGE_ROLE_SPIN_BUTTON:
+    case BRIDGE_ROLE_PROGRESS_BAR:
+    case BRIDGE_ROLE_PAGE_TAB_LIST:
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* A Static that shows text, not an icon, bitmap, frame or rectangle. */
+static BOOL is_text_static(HWND hwnd)
+{
+    switch (GetWindowLongW(hwnd, GWL_STYLE) & SS_TYPEMASK)
+    {
+    case SS_LEFT:
+    case SS_CENTER:
+    case SS_RIGHT:
+    case SS_SIMPLE:
+    case SS_LEFTNOWORDWRAP:
+    case SS_OWNERDRAW:
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/*
+ * Name of an unnamed control from the Static before it in the dialog, as
+ * oleacc does on Windows. Wine's oleacc does this only for a bare Edit,
+ * not for the Edit inside a combo box or for other controls. The label
+ * must be the nearest visible sibling before the control (hidden windows
+ * and empty or picture Statics are skipped); the "&" of the mnemonic is
+ * dropped.
+ */
+static void find_label(HWND hwnd, char *dst, int size)
+{
+    WCHAR cls[64], buf[NAME_MAX_UTF8 / 3];
+    HWND parent, cur;
+    DWORD_PTR len;
+    int i, j;
+
+    dst[0] = 0;
+    while ((parent = GetParent(hwnd)) && GetClassNameW(parent, cls, ARRAYSIZE(cls)) &&
+           (!lstrcmpiW(cls, L"ComboBox") || !lstrcmpiW(cls, L"ComboBoxEx32")))
+        hwnd = parent;
+    for (cur = GetWindow(hwnd, GW_HWNDPREV); cur; cur = GetWindow(cur, GW_HWNDPREV))
+    {
+        if (!(GetWindowLongW(cur, GWL_STYLE) & WS_VISIBLE))
+            continue;
+        if (!GetClassNameW(cur, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"Static"))
+            return;
+        if (!is_text_static(cur))
+            continue;
+        if (!SendMessageTimeoutW(cur, WM_GETTEXT, ARRAYSIZE(buf), (LPARAM)buf,
+                                 SMTO_ABORTIFHUNG, 500, &len))
+            return;
+        buf[min(len, ARRAYSIZE(buf) - 1)] = 0;
+        if (!buf[0])
+            continue;
+        break;
+    }
+    if (!cur)
+        return;
+    if (!(GetWindowLongW(cur, GWL_STYLE) & SS_NOPREFIX))
+    {
+        for (i = j = 0; buf[i]; i++)
+        {
+            if (buf[i] == '&')
+            {
+                if (buf[i + 1] != '&')
+                    continue;
+                i++;
+            }
+            buf[j++] = buf[i];
+        }
+        buf[j] = 0;
+    }
+    to_utf8(buf, dst, size);
+}
+
 /*
  * Fills obj from MSAA and the window class; the strings point into str.
  * FALSE if MSAA failed.
@@ -434,6 +525,8 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         obj->value = str->value;
         str->object[0] = 0;
     }
+    if (!str->object[0] && !obj->child && needs_label(obj->role))
+        find_label(hwnd, str->object, sizeof(str->object));
 
     SysFreeString(name);
     VariantClear(&role);
