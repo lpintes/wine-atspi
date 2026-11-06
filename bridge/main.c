@@ -614,6 +614,17 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
     memset(&obj, 0, sizeof(obj));
     if (!describe_object(hwnd, last_focus.id_object, last_focus.id_child, &obj, &str))
         return;
+    /*
+     * describe_object waits for the target, and a focus event for another
+     * window can be handled meanwhile (seen with the message box after
+     * Alt+F4). Do not send a stale update after the new focus.
+     */
+    if (hwnd != last_focus.hwnd)
+    {
+        trace(L"key check: focus moved to %p meanwhile", last_focus.hwnd);
+        free_strings(&str);
+        return;
+    }
     trace(L"key check: %p %ld %ld name \"%S\" value \"%S\" caret %d", hwnd,
           last_focus.id_object, last_focus.id_child, obj.name, obj.value ? obj.value : "",
           obj.text ? obj.caret : -1);

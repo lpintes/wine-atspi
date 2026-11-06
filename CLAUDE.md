@@ -210,6 +210,11 @@ Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
   timestamp, string, is_text. Its introspection says `(uiuuisb)`, which
   is rejected with InvalidArgs; an unwrapped argument list crashes the
   registry (at-spi2-core 2.62.1). Keycode 0 is not delivered.
+- In WSLg the compositor takes Alt+F4 itself. Notepad's save-changes
+  message box then gets no focus inside Wine: `GetGUIThreadInfo` keeps
+  reporting the `Edit`, and Wine focuses the box only on the next key. In
+  the Arch image (MATE, real X11) the box gets focus at once, so the bridge
+  does not work around it.
 - `EM_GETSEL` returns the selection ordered (`EDIT_EM_GetSel`), so it does
   not tell which end has the caret. `EM_POSFROMCHAR` of the start compared
   with `GetGUIThreadInfo().rcCaret` does, across processes.

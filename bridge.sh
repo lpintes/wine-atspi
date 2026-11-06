@@ -23,6 +23,14 @@ if [ ! -f $BUILD/wine-atspi.exe.so ]; then
 fi
 pgrep -x orca > /dev/null || echo "note: Orca is not running" >&2
 
+# A new prefix would ask to install Wine Mono and Gecko, and that dialog
+# blocks the first program for minutes. Neither is needed for the tests.
+if [ ! -d "$WINEPREFIX" ]; then
+    echo "creating prefix $WINEPREFIX"
+    WINEDLLOVERRIDES="mscoree=;mshtml=" wineboot -u
+    wineserver -w
+fi
+
 bridge=
 # The brackets keep the pattern from matching a command line quoting it.
 if ! pgrep -f '[w]ine-atspi\.exe' > /dev/null; then
