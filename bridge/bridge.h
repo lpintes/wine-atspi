@@ -94,6 +94,15 @@ struct bridge_object
     const char *name;           /* may be NULL */
     const char *value;          /* current value, e.g. a combo box text; may be NULL */
     const char *window_class;   /* GetClassName of hwnd, may be NULL */
+    /*
+     * Content of a text control, NULL for objects without text. Line
+     * breaks are "\n". Offsets count characters (code points), as AT-SPI
+     * does; selection_start == selection_end means no selection.
+     */
+    const char *text;
+    int caret;
+    int selection_start;
+    int selection_end;
 };
 
 /* Focus moved to object, which lives in top-level window frame. */
@@ -103,6 +112,21 @@ struct bridge_focus
     const char *app_name;       /* executable name, e.g. "notepad.exe" */
     struct bridge_object frame;
     struct bridge_object object;
+};
+
+/*
+ * One key press or release, in X11 terms, as GTK's atk-bridge reports it
+ * to the registry's DeviceEventController.
+ */
+struct bridge_key
+{
+    int pressed;                /* 1 press, 0 release */
+    unsigned int keysym;        /* X keysym, e.g. 0xff51 for Left */
+    unsigned int keycode;       /* X keycode: evdev code + 8 */
+    unsigned int modifiers;     /* X modifier mask: ShiftMask, ControlMask, ... */
+    unsigned int timestamp;     /* milliseconds */
+    const char *string;         /* typed text or key name, may be NULL */
+    int is_text;                /* string is typed text */
 };
 
 /*
@@ -119,10 +143,18 @@ void atspi_post_focus(const struct bridge_focus *focus);
 
 /*
  * Reports a fresh look at an object of process pid, e.g. after a key
- * press: a changed name or state is announced. Objects not in the model
+ * press: a changed name, state, text or caret is announced. Objects not in the model
  * are ignored. Copies everything; callable from any thread.
  */
 void atspi_post_update(unsigned int pid, const struct bridge_object *object);
+
+/*
+ * Reports a key to the registry, for screen readers that get keys only
+ * from applications (libatspi's legacy device: Wayland without a
+ * compositor keyboard monitor, e.g. WSLg). Copies everything; callable
+ * from any thread.
+ */
+void atspi_post_key(const struct bridge_key *key);
 
 /*
  * Reports that window hwnd was hidden or destroyed: every object of that

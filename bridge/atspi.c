@@ -59,7 +59,141 @@ static const char introspection_xml[] =
     "   <arg direction='out' type='s'/>"
     "  </method>"
     " </interface>"
+    " <interface name='org.a11y.atspi.Text'>"
+    "  <property name='CharacterCount' type='i' access='read'/>"
+    "  <property name='CaretOffset' type='i' access='read'/>"
+    "  <method name='GetStringAtOffset'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='in' name='granularity' type='u'/>"
+    "   <arg direction='out' type='s'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetText'>"
+    "   <arg direction='in' name='startOffset' type='i'/>"
+    "   <arg direction='in' name='endOffset' type='i'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='SetCaretOffset'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='GetTextBeforeOffset'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='in' name='type' type='u'/>"
+    "   <arg direction='out' type='s'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetTextAtOffset'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='in' name='type' type='u'/>"
+    "   <arg direction='out' type='s'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetTextAfterOffset'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='in' name='type' type='u'/>"
+    "   <arg direction='out' type='s'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetCharacterAtOffset'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetAttributeValue'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='in' name='attributeName' type='s'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='GetAttributes'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='out' type='a{ss}'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetDefaultAttributes'><arg direction='out' type='a{ss}'/></method>"
+    "  <method name='GetCharacterExtents'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='in' name='coordType' type='u'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetOffsetAtPoint'>"
+    "   <arg direction='in' name='x' type='i'/>"
+    "   <arg direction='in' name='y' type='i'/>"
+    "   <arg direction='in' name='coordType' type='u'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetNSelections'><arg direction='out' type='i'/></method>"
+    "  <method name='GetSelection'>"
+    "   <arg direction='in' name='selectionNum' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='AddSelection'>"
+    "   <arg direction='in' name='startOffset' type='i'/>"
+    "   <arg direction='in' name='endOffset' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='RemoveSelection'>"
+    "   <arg direction='in' name='selectionNum' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='SetSelection'>"
+    "   <arg direction='in' name='selectionNum' type='i'/>"
+    "   <arg direction='in' name='startOffset' type='i'/>"
+    "   <arg direction='in' name='endOffset' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='GetRangeExtents'>"
+    "   <arg direction='in' name='startOffset' type='i'/>"
+    "   <arg direction='in' name='endOffset' type='i'/>"
+    "   <arg direction='in' name='coordType' type='u'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetAttributeRun'>"
+    "   <arg direction='in' name='offset' type='i'/>"
+    "   <arg direction='in' name='includeDefaults' type='b'/>"
+    "   <arg direction='out' type='a{ss}'/>"
+    "   <arg direction='out' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetDefaultAttributeSet'><arg direction='out' type='as'/></method>"
+    "  <method name='ScrollSubstringTo'>"
+    "   <arg direction='in' name='startOffset' type='i'/>"
+    "   <arg direction='in' name='endOffset' type='i'/>"
+    "   <arg direction='in' name='type' type='u'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='ScrollSubstringToPoint'>"
+    "   <arg direction='in' name='startOffset' type='i'/>"
+    "   <arg direction='in' name='endOffset' type='i'/>"
+    "   <arg direction='in' name='type' type='u'/>"
+    "   <arg direction='in' name='x' type='i'/>"
+    "   <arg direction='in' name='y' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    " </interface>"
     "</node>";
+
+#define IFACE_ACCESSIBLE "org.a11y.atspi.Accessible"
+#define IFACE_APPLICATION "org.a11y.atspi.Application"
+#define IFACE_TEXT "org.a11y.atspi.Text"
+
+/* AtspiTextGranularity */
+enum { GRANULARITY_CHAR, GRANULARITY_WORD, GRANULARITY_SENTENCE, GRANULARITY_LINE,
+       GRANULARITY_PARAGRAPH };
+/* AtspiTextBoundaryType */
+enum { BOUNDARY_CHAR, BOUNDARY_WORD_START, BOUNDARY_WORD_END, BOUNDARY_SENTENCE_START,
+       BOUNDARY_SENTENCE_END, BOUNDARY_LINE_START, BOUNDARY_LINE_END };
 
 struct app;
 
@@ -75,6 +209,12 @@ struct node
     char *name;
     char *value;
     char *window_class;
+    /* Text interface; chars is NULL for nodes without one. */
+    gunichar *chars;
+    glong count;
+    gint caret;
+    gint selection_start;
+    gint selection_end;
 };
 
 struct app
@@ -198,6 +338,212 @@ static const char *state_name(guint state)
     return NULL;
 }
 
+/* UTF-8 copy of characters [start, end) of node's text, clamped. */
+static char *text_slice(struct node *node, gint start, gint end)
+{
+    if (end < 0 || end > node->count)
+        end = node->count;
+    if (start < 0)
+        start = 0;
+    if (start >= end)
+        return g_strdup("");
+    return g_ucs4_to_utf8(node->chars + start, end - start, NULL, NULL, NULL);
+}
+
+static gboolean is_word_char(gunichar c)
+{
+    return g_unichar_isalnum(c) || g_unichar_ismark(c);
+}
+
+/*
+ * Range [*start, *end) of the unit of granularity at offset, with the ATK
+ * meaning: a word runs to the start of the next word, a line includes its
+ * "\n". At the end of text ending in "\n" the line is empty. Sentences
+ * and paragraphs are logical lines for now.
+ */
+static void text_range(struct node *node, gint offset, guint granularity,
+                       gint *start, gint *end)
+{
+    const gunichar *c = node->chars;
+    gint n = node->count, i;
+
+    offset = CLAMP(offset, 0, n);
+    switch (granularity)
+    {
+    case GRANULARITY_CHAR:
+        *start = offset;
+        *end = MIN(offset + 1, n);
+        return;
+    case GRANULARITY_WORD:
+        for (i = offset; i > 0; i--)
+            if (i < n && is_word_char(c[i]) && !is_word_char(c[i - 1]))
+                break;
+        *start = i;
+        for (i = offset + 1; i < n; i++)
+            if (is_word_char(c[i]) && !is_word_char(c[i - 1]))
+                break;
+        *end = MIN(i, n);
+        return;
+    default:
+        for (i = offset; i > 0 && c[i - 1] != '\n'; i--)
+            ;
+        *start = i;
+        for (i = offset; i < n && c[i] != '\n'; i++)
+            ;
+        *end = MIN(i + 1, n);
+        return;
+    }
+}
+
+static guint boundary_granularity(guint boundary)
+{
+    switch (boundary)
+    {
+    case BOUNDARY_CHAR: return GRANULARITY_CHAR;
+    case BOUNDARY_WORD_START:
+    case BOUNDARY_WORD_END: return GRANULARITY_WORD;
+    }
+    return GRANULARITY_LINE;
+}
+
+/* GetText{Before,At,After}Offset: which -1, 0 or 1. */
+static GVariant *text_near_offset(struct node *node, gint offset, guint boundary, int which)
+{
+    guint granularity = boundary_granularity(boundary);
+    gint start, end;
+    GVariant *ret;
+    char *s;
+
+    text_range(node, offset, granularity, &start, &end);
+    if (which < 0)
+    {
+        if (start > 0)
+            text_range(node, start - 1, granularity, &start, &end);
+        else
+            start = end = 0;
+    }
+    else if (which > 0)
+    {
+        if (end < node->count && end > start)
+            text_range(node, end, granularity, &start, &end);
+        else
+            start = end = node->count;
+    }
+    s = text_slice(node, start, end);
+    ret = g_variant_new("(sii)", s, start, end);
+    g_free(s);
+    return ret;
+}
+
+static GVariant *empty_attributes(void)
+{
+    return g_variant_new_array(G_VARIANT_TYPE("{ss}"), NULL, 0);
+}
+
+/* Handles a Text method; NULL if method is none. */
+static GVariant *text_method(struct node *node, const char *method, GVariant *params)
+{
+    gint offset, start, end;
+    guint type;
+    GVariant *ret;
+    char *s;
+
+    if (!g_strcmp0(method, "GetStringAtOffset"))
+    {
+        g_variant_get(params, "(iu)", &offset, &type);
+        if (offset < 0 || offset > node->count)
+            return g_variant_new("(sii)", "", -1, -1);
+        text_range(node, offset, type, &start, &end);
+        s = text_slice(node, start, end);
+        ret = g_variant_new("(sii)", s, start, end);
+        g_free(s);
+        return ret;
+    }
+    if (!g_strcmp0(method, "GetText"))
+    {
+        g_variant_get(params, "(ii)", &start, &end);
+        s = text_slice(node, start, end);
+        ret = g_variant_new("(s)", s);
+        g_free(s);
+        return ret;
+    }
+    if (!g_strcmp0(method, "GetTextBeforeOffset"))
+    {
+        g_variant_get(params, "(iu)", &offset, &type);
+        return text_near_offset(node, offset, type, -1);
+    }
+    if (!g_strcmp0(method, "GetTextAtOffset"))
+    {
+        g_variant_get(params, "(iu)", &offset, &type);
+        return text_near_offset(node, offset, type, 0);
+    }
+    if (!g_strcmp0(method, "GetTextAfterOffset"))
+    {
+        g_variant_get(params, "(iu)", &offset, &type);
+        return text_near_offset(node, offset, type, 1);
+    }
+    if (!g_strcmp0(method, "GetCharacterAtOffset"))
+    {
+        g_variant_get(params, "(i)", &offset);
+        return g_variant_new("(i)", offset >= 0 && offset < node->count
+                                        ? (gint32)node->chars[offset] : 0);
+    }
+    if (!g_strcmp0(method, "GetNSelections"))
+        return g_variant_new("(i)", node->selection_start != node->selection_end);
+    if (!g_strcmp0(method, "GetSelection"))
+    {
+        g_variant_get(params, "(i)", &offset);
+        if (offset == 0 && node->selection_start != node->selection_end)
+            return g_variant_new("(ii)", node->selection_start, node->selection_end);
+        return g_variant_new("(ii)", 0, 0);
+    }
+    if (!g_strcmp0(method, "GetAttributes") || !g_strcmp0(method, "GetAttributeRun"))
+        return g_variant_new("(@a{ss}ii)", empty_attributes(), 0, (gint)node->count);
+    if (!g_strcmp0(method, "GetDefaultAttributes"))
+        return g_variant_new("(@a{ss})", empty_attributes());
+    if (!g_strcmp0(method, "GetDefaultAttributeSet"))
+        return g_variant_new("(@as)", g_variant_new_strv(NULL, 0));
+    if (!g_strcmp0(method, "GetAttributeValue"))
+        return g_variant_new("(s)", "");
+    if (!g_strcmp0(method, "GetCharacterExtents") || !g_strcmp0(method, "GetRangeExtents"))
+        return g_variant_new("(iiii)", 0, 0, 0, 0);
+    if (!g_strcmp0(method, "GetOffsetAtPoint"))
+        return g_variant_new("(i)", -1);
+    /* Changing the caret or selection would need the Win32 thread; not yet. */
+    if (!g_strcmp0(method, "SetCaretOffset") || !g_strcmp0(method, "AddSelection") ||
+        !g_strcmp0(method, "RemoveSelection") || !g_strcmp0(method, "SetSelection") ||
+        !g_strcmp0(method, "ScrollSubstringTo") || !g_strcmp0(method, "ScrollSubstringToPoint"))
+        return g_variant_new("(b)", FALSE);
+    return NULL;
+}
+
+/* Interfaces of node, the first always Accessible. */
+static const char *const *node_interfaces(struct node *node, guint *count)
+{
+    static const char *const app_ifaces[] = { IFACE_ACCESSIBLE, IFACE_APPLICATION };
+    static const char *const text_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TEXT };
+
+    if (!node->parent)
+    {
+        *count = 2;
+        return app_ifaces;
+    }
+    *count = node->chars ? 2 : 1;
+    return text_ifaces;
+}
+
+static gboolean node_has_interface(struct node *node, const char *iface)
+{
+    const char *const *ifaces;
+    guint i, count;
+
+    ifaces = node_interfaces(node, &count);
+    for (i = 0; i < count; i++)
+        if (!g_strcmp0(ifaces[i], iface))
+            return TRUE;
+    return FALSE;
+}
+
 static void set_state(struct node *node, guint state, gboolean on)
 {
     guint64 bit = BRIDGE_STATE_BIT(state);
@@ -219,7 +565,9 @@ static void method_call(GDBusConnection *conn, const char *sender,
     GVariant *ret = NULL;
     guint i;
 
-    if (!g_strcmp0(method, "GetChildAtIndex"))
+    if (!g_strcmp0(iface, IFACE_TEXT))
+        ret = text_method(node, method, params);
+    else if (!g_strcmp0(method, "GetChildAtIndex"))
     {
         gint index;
 
@@ -273,10 +621,9 @@ static void method_call(GDBusConnection *conn, const char *sender,
         ret = g_variant_new("(@(so))", node_ref(node->app->root));
     else if (!g_strcmp0(method, "GetInterfaces"))
     {
-        const char *ifaces[] = { "org.a11y.atspi.Accessible",
-                                 "org.a11y.atspi.Application" };
-        ret = g_variant_new("(@as)",
-                            g_variant_new_strv(ifaces, node->parent ? 1 : 2));
+        const char *const *ifaces = node_interfaces(node, &i);
+
+        ret = g_variant_new("(@as)", g_variant_new_strv(ifaces, i));
     }
     else if (!g_strcmp0(method, "GetLocale"))
         ret = g_variant_new("(s)", "");
@@ -312,6 +659,10 @@ static GVariant *get_property(GDBusConnection *conn, const char *sender,
         return g_variant_new_string("2.1");
     if (!g_strcmp0(prop, "Id"))
         return g_variant_new_int32(node->app->id);
+    if (!g_strcmp0(prop, "CharacterCount"))
+        return g_variant_new_int32(node->count);
+    if (!g_strcmp0(prop, "CaretOffset"))
+        return g_variant_new_int32(node->caret);
     g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_PROPERTY,
                 "%s not supported", prop);
     return NULL;
@@ -362,14 +713,16 @@ static GDBusInterfaceInfo **subtree_introspect(GDBusConnection *conn,
     struct app *app = data;
     struct node *node = name ? g_hash_table_lookup(app->nodes, name) : NULL;
     GDBusInterfaceInfo **ret;
-    int i, count;
+    const char *const *ifaces;
+    guint i, count;
 
     if (!node)
         return NULL;
-    count = node->parent ? 1 : 2;
+    ifaces = node_interfaces(node, &count);
     ret = g_new0(GDBusInterfaceInfo *, count + 1);
     for (i = 0; i < count; i++)
-        ret[i] = g_dbus_interface_info_ref(introspection->interfaces[i]);
+        ret[i] = g_dbus_interface_info_ref(
+            g_dbus_node_info_lookup_interface(introspection, ifaces[i]));
     return ret;
 }
 
@@ -386,7 +739,7 @@ static const GDBusInterfaceVTable *subtree_dispatch(GDBusConnection *conn,
 
     if (!node)
         return NULL;
-    if (!g_strcmp0(iface, "org.a11y.atspi.Application") && node->parent)
+    if (!node_has_interface(node, iface))
         return NULL;
     *out_data = node;
     return &vtable;
@@ -433,6 +786,7 @@ static void node_free(struct node *node)
     g_free(node->name);
     g_free(node->value);
     g_free(node->window_class);
+    g_free(node->chars);
     g_free(node);
 }
 
@@ -460,7 +814,64 @@ static char *object_id(const struct bridge_object *obj)
 #define OWN_STATES (BRIDGE_STATE_BIT(BRIDGE_STATE_ACTIVE) | \
                     BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED))
 
-/* Copies obj into an existing node, announcing a changed name or state. */
+/* Announces characters [start, start + len) of node's text as inserted or deleted. */
+static void emit_text_changed(struct node *node, const char *detail, gint start, gint len)
+{
+    char *s;
+
+    if (len <= 0)
+        return;
+    s = text_slice(node, start, start + len);
+    emit(node, EVENT_OBJECT, "TextChanged", detail, start, len, g_variant_new_string(s));
+    g_free(s);
+}
+
+/*
+ * Copies the text, caret and selection of obj into node. With announce,
+ * a changed text goes out as one delete and one insert of the differing
+ * middle part, then caret and selection events, in the order GTK uses.
+ */
+static void set_text(struct node *node, const struct bridge_object *obj, gboolean announce)
+{
+    glong count;
+    gunichar *chars = g_utf8_to_ucs4_fast(obj->text, -1, &count);
+    gint prefix = 0, suffix = 0, old_caret = node->caret;
+    gboolean had_selection = node->selection_start != node->selection_end;
+    gboolean has_selection = obj->selection_start != obj->selection_end;
+    gboolean selection_changed;
+
+    if (!node->chars)
+        announce = FALSE;
+    if (announce)
+    {
+        while (prefix < count && prefix < node->count && chars[prefix] == node->chars[prefix])
+            prefix++;
+        while (suffix < count - prefix && suffix < node->count - prefix &&
+               chars[count - 1 - suffix] == node->chars[node->count - 1 - suffix])
+            suffix++;
+        emit_text_changed(node, "delete", prefix, node->count - prefix - suffix);
+    }
+    g_free(node->chars);
+    node->chars = chars;
+    node->count = count;
+    if (announce)
+        emit_text_changed(node, "insert", prefix, count - prefix - suffix);
+
+    node->caret = CLAMP(obj->caret, 0, count);
+    selection_changed = (had_selection || has_selection) &&
+                        (node->selection_start != obj->selection_start ||
+                         node->selection_end != obj->selection_end);
+    node->selection_start = CLAMP(obj->selection_start, 0, count);
+    node->selection_end = CLAMP(obj->selection_end, node->selection_start, count);
+    if (!announce)
+        return;
+    if (node->caret != old_caret)
+        emit(node, EVENT_OBJECT, "TextCaretMoved", "", node->caret, 0, g_variant_new_int32(0));
+    if (selection_changed)
+        emit(node, EVENT_OBJECT, "TextSelectionChanged", "", 0, 0, g_variant_new_int32(0));
+}
+
+/* Copies obj into an existing node, announcing a changed name, state or text. */
 static void update_node(struct node *node, const struct bridge_object *obj)
 {
     guint64 changed = (node->states ^ obj->states) & ~OWN_STATES;
@@ -490,6 +901,8 @@ static void update_node(struct node *node, const struct bridge_object *obj)
         if (node->role == BRIDGE_ROLE_COMBO_BOX)
             emit(node, EVENT_OBJECT, "SelectionChanged", "", 0, 0, g_variant_new_int32(0));
     }
+    if (obj->text)
+        set_text(node, obj, TRUE);
 }
 
 /* Finds or creates the node for obj below parent and updates it. */
@@ -507,6 +920,8 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         node->name = g_strdup(obj->name);
         node->value = g_strdup(obj->value);
         node->window_class = g_strdup(obj->window_class);
+        if (obj->text)
+            set_text(node, obj, FALSE);
     }
     else
         update_node(node, obj);
@@ -657,6 +1072,7 @@ static void free_object(struct bridge_object *obj)
     g_free((char *)obj->name);
     g_free((char *)obj->value);
     g_free((char *)obj->window_class);
+    g_free((char *)obj->text);
 }
 
 static void free_update(gpointer data)
@@ -683,6 +1099,7 @@ static void copy_object(struct bridge_object *dst, const struct bridge_object *s
     dst->name = g_strdup(src->name);
     dst->value = g_strdup(src->value);
     dst->window_class = g_strdup(src->window_class);
+    dst->text = g_strdup(src->text);
 }
 
 static void post(GSourceFunc func, gpointer data, GDestroyNotify free_func)
@@ -712,6 +1129,63 @@ void atspi_post_update(unsigned int pid, const struct bridge_object *object)
     u->pid = pid;
     copy_object(&u->object, object);
     post(update_idle, u, free_update);
+}
+
+/* Connection for key reports; not tied to any application. */
+static GDBusConnection *key_conn;
+
+static gboolean key_idle(gpointer data)
+{
+    const struct bridge_key *k = data;
+    GError *error = NULL;
+
+    if (!key_conn)
+    {
+        key_conn = g_dbus_connection_new_for_address_sync(
+            a11y_address,
+            G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
+                G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
+            NULL, NULL, &error);
+        if (!key_conn)
+        {
+            g_printerr("wine-atspi: no connection for keys: %s\n", error->message);
+            g_error_free(error);
+            return G_SOURCE_REMOVE;
+        }
+    }
+    /*
+     * Accessibility_DeviceEvent: type 0 press, 1 release; id keysym;
+     * hw_code keycode; modifiers; timestamp; event_string; is_text. The
+     * registry's introspection says (uiuuisb), but it only accepts
+     * (uinnisb), as atk-bridge sends it; anything else is rejected and a
+     * bare (non-struct) argument list crashes the registry. The reply
+     * (consumed) is not waited for: the key has already gone on to the target.
+     */
+    g_dbus_connection_call(
+        key_conn, "org.a11y.atspi.Registry", "/org/a11y/atspi/registry/deviceeventcontroller",
+        "org.a11y.atspi.DeviceEventController", "NotifyListenersSync",
+        g_variant_new("((uinnisb))", k->pressed ? 0 : 1, (gint32)k->keysym,
+                      (gint16)k->keycode, (gint16)k->modifiers, (gint32)k->timestamp,
+                      k->string ? k->string : "", (gboolean)k->is_text),
+        G_VARIANT_TYPE("(b)"), G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+    return G_SOURCE_REMOVE;
+}
+
+static void free_key(gpointer data)
+{
+    struct bridge_key *k = data;
+
+    g_free((char *)k->string);
+    g_free(k);
+}
+
+void atspi_post_key(const struct bridge_key *key)
+{
+    struct bridge_key *k = g_new(struct bridge_key, 1);
+
+    *k = *key;
+    k->string = g_strdup(key->string);
+    post(key_idle, k, free_key);
 }
 
 void atspi_post_window_gone(unsigned long long hwnd)

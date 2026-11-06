@@ -18,15 +18,21 @@ sleep 1
 wine notepad &
 sleep 3
 
-# Ctrl+O opens the Open dialog; Tab moves through its controls. Down in
-# the file type combo box must rename it (no WinEvent, found by the key
-# check). The dialog is opened twice: once closed, it must leave the tree.
+# Typing and caret keys in the Edit must give text-changed and
+# text-caret-moved events (no WinEvent for the caret, found by the key
+# check); shift+home selects "Hello", backspace deletes it. Ctrl+O opens the Open dialog; Tab moves
+# through its controls. Down in the file type combo box must rename it.
+# The dialog is opened twice: once closed, it must leave the tree.
+# Alt+F4 must focus a button of the "save changes?" message box.
 timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \
-    t:"Hello" w:300 \
+    t:"Hello" w:300 k:return w:300 t:"second line" w:300 \
+    k:up w:300 k:ctrl+left w:300 k:ctrl+right w:300 k:shift+home w:300 \
+    k:back w:300 k:ctrl+end w:300 \
     k:ctrl+o w:1500 k:tab w:500 k:down w:500 k:up w:500 \
     k:tab w:500 k:tab w:500 \
     k:escape w:1000 t:" world" w:500 \
-    k:ctrl+o w:3000 k:escape w:1000
+    k:ctrl+o w:3000 k:escape w:1000 \
+    k:alt+f4 w:1500 k:right w:500
 
 wait $events
 python3 tests/atspi-dump.py notepad >> "$LOG" 2>&1

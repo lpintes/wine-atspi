@@ -186,6 +186,33 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
 - `object:selection-changed` whose source is the focused combo box makes
   Orca present the combo box again (`_on_selection_changed`). The bridge
   emits it when the combo value changes.
+- Orca reads text almost only through `Atspi.Text.get_string_at_offset`
+  with a granularity (`ax_text.py`), plus caret offset, character count,
+  `get_text` and selections. For multi-line text at the end offset it
+  expects the empty last line, as GTK3 gives it.
+
+Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
+
+- Orca names the reason of a caret move or text insertion from the last
+  key it saw itself; without a key the reason is UNKNOWN and it speaks
+  nothing (only text selection changes are still presented). Orca gets
+  keys from `Atspi.Device.new_full` (libatspi `atspi-device.c`): X11
+  device only when `WAYLAND_DISPLAY` is unset, else the compositor's
+  `org.freedesktop.a11y.KeyboardMonitor` (Mutter), else the *legacy*
+  device. The legacy device (WSLg) only hears keys that applications
+  report to the registry, as GTK's atk-bridge does. The bridge therefore
+  reports every key from its `WH_KEYBOARD_LL` hook (`report_key`,
+  `atspi_post_key`).
+- The registry's `DeviceEventController.NotifyListenersSync`
+  (`/org/a11y/atspi/registry/deviceeventcontroller` on
+  `org.a11y.atspi.Registry`) accepts only one struct `(uinnisb)`: type
+  (0 press, 1 release), X keysym, X keycode (evdev + 8), X modifier mask,
+  timestamp, string, is_text. Its introspection says `(uiuuisb)`, which
+  is rejected with InvalidArgs; an unwrapped argument list crashes the
+  registry (at-spi2-core 2.62.1). Keycode 0 is not delivered.
+- `EM_GETSEL` returns the selection ordered (`EDIT_EM_GetSel`), so it does
+  not tell which end has the caret. `EM_POSFROMCHAR` of the start compared
+  with `GetGUIThreadInfo().rcCaret` does, across processes.
 
 ## Open questions (to verify by experiment)
 

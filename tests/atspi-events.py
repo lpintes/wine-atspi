@@ -6,9 +6,12 @@ Only events from applications whose toolkit is TOOLKIT (default
 "wine-atspi") are printed. Each line shows the event, the application,
 and the source's role, name and parent chain.
 """
+import os
 import sys
 
 import gi
+
+os.environ["ATSPI_USE_LEGACY_DEVICE"] = "1"
 
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi, GLib  # noqa: E402
@@ -18,6 +21,9 @@ EVENTS = [
     "object:children-changed",
     "object:property-change:accessible-name",
     "object:selection-changed",
+    "object:text-changed",
+    "object:text-caret-moved",
+    "object:text-selection-changed",
     "window:activate",
     "window:deactivate",
 ]
@@ -29,9 +35,28 @@ def describe(obj):
         value = (obj.get_attributes() or {}).get("valuetext")
         if value is not None:
             text += " value=%r" % value
+        text += describe_text(obj)
         return text
     except GLib.Error as e:
         return "<%s>" % e.message
+
+
+def describe_text(obj):
+    """Caret, selection, the caret's line and word, as Orca asks for them."""
+    if obj.get_text_iface() is None:
+        return ""
+    # Module functions: on the object, get_selection is Accessible's.
+    text = Atspi.Text
+    caret = text.get_caret_offset(obj)
+    line = text.get_string_at_offset(obj, caret, Atspi.TextGranularity.LINE)
+    word = text.get_string_at_offset(obj, caret, Atspi.TextGranularity.WORD)
+    out = " caret=%d/%d line=%r(%d-%d) word=%r" % (
+        caret, text.get_character_count(obj), line.content, line.start_offset,
+        line.end_offset, word.content)
+    if text.get_n_selections(obj):
+        sel = text.get_selection(obj, 0)
+        out += " sel=%d-%d" % (sel.start_offset, sel.end_offset)
+    return out
 
 
 def chain(obj):
@@ -51,11 +76,21 @@ def on_event(event, toolkit):
         app = event.source.get_application()
         if app is None or app.get_toolkit_name() != toolkit:
             return
-        print("%s(%d) app=%r src=%s | %s" % (
-            event.type, event.detail1, app.get_name(), describe(event.source),
+        detail = "%d" % event.detail1
+        if event.type.startswith("object:text-changed"):
+            detail += ",%d,%r" % (event.detail2, event.any_data)
+        print("%s(%s) app=%r src=%s | %s" % (
+            event.type, detail, app.get_name(), describe(event.source),
             chain(event.source)), flush=True)
     except GLib.Error as e:
         print("%s error %s" % (event.type, e.message), flush=True)
+
+
+def on_key(device, pressed, keycode, keysym, modifiers, string):
+    if pressed:
+        print("key %r keysym=%#x keycode=%d modifiers=%#x" % (
+            string, keysym, keycode, modifiers), flush=True)
+    return False
 
 
 def main():
@@ -64,6 +99,10 @@ def main():
     listener = Atspi.EventListener.new(on_event, toolkit)
     for name in EVENTS:
         listener.register(name)
+    # Keys the way Orca gets them without a compositor keyboard monitor
+    # (WSLg): through the registry, from applications that report them.
+    device = Atspi.Device.new()
+    device.add_key_watcher(on_key)
     loop = GLib.MainLoop()
     GLib.timeout_add(int(seconds * 1000), loop.quit)
     loop.run()

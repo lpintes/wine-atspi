@@ -48,7 +48,14 @@ struct focus_strings
     char value[NAME_MAX_UTF8];
     char frame_class[256 * 3];
     char object_class[256 * 3];
+    char *text;     /* heap, see free_strings */
 };
+
+static void free_strings(struct focus_strings *str)
+{
+    HeapFree(GetProcessHeap(), 0, str->text);
+    str->text = NULL;
+}
 
 static void to_utf8(const WCHAR *src, char *dst, int size)
 {
@@ -265,6 +272,100 @@ static void refine_text(HWND hwnd, LONG msaa_state, struct bridge_object *obj)
                     ? BRIDGE_ROLE_PASSWORD_TEXT : BRIDGE_ROLE_ENTRY;
 }
 
+/* Text beyond this many UTF-16 units is cut off. */
+#define TEXT_MAX_CHARS (1 << 20)
+
+/*
+ * Character offset of UTF-16 position pos in text as the AT-SPI side sees
+ * it: surrogate pairs count once and the "\r" of "\r\n" is dropped.
+ */
+static int char_offset(const WCHAR *text, int len, int pos)
+{
+    int i, offset = 0;
+
+    for (i = 0; i < pos && i < len; i++)
+    {
+        if (IS_LOW_SURROGATE(text[i]) && i > 0 && IS_HIGH_SURROGATE(text[i - 1]))
+            continue;
+        if (text[i] == '\r' && i + 1 < len && text[i + 1] == '\n')
+            continue;
+        offset++;
+    }
+    return offset;
+}
+
+/*
+ * EM_GETSEL orders start and end, so it does not tell at which end the
+ * caret is. Compare the caret rectangle with the position of the start.
+ */
+static BOOL caret_at_start(HWND hwnd, DWORD start)
+{
+    GUITHREADINFO gti;
+    DWORD_PTR pos;
+
+    memset(&gti, 0, sizeof(gti));
+    gti.cbSize = sizeof(gti);
+    if (!GetGUIThreadInfo(GetWindowThreadProcessId(hwnd, NULL), &gti) ||
+        gti.hwndCaret != hwnd ||
+        !SendMessageTimeoutW(hwnd, EM_POSFROMCHAR, start, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
+        pos == (DWORD_PTR)-1)
+        return FALSE;
+    return (short)LOWORD(pos) == gti.rcCaret.left && (short)HIWORD(pos) == gti.rcCaret.top;
+}
+
+/* Text, caret and selection of an Edit or RichEdit; str->text owns the text. */
+static void describe_edit_text(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
+{
+    DWORD_PTR len = 0;
+    DWORD start = 0, end = 0;
+    WCHAR *buf, *src, *dst;
+    int size, i, n;
+
+    if (!SendMessageTimeoutW(hwnd, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, 500, &len))
+        return;
+    if (len > TEXT_MAX_CHARS)
+        len = TEXT_MAX_CHARS;
+    buf = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
+    if (!buf)
+        return;
+    if (!SendMessageTimeoutW(hwnd, WM_GETTEXT, len + 1, (LPARAM)buf, SMTO_ABORTIFHUNG, 500, &len))
+        len = 0;
+    buf[len] = 0;
+    n = len;
+    /* Pointer arguments of EM_GETSEL are marshalled like on Windows. */
+    SendMessageTimeoutW(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end, SMTO_ABORTIFHUNG, 500, NULL);
+    obj->selection_start = char_offset(buf, n, start);
+    obj->selection_end = char_offset(buf, n, end);
+    obj->caret = start != end && caret_at_start(hwnd, start)
+                     ? obj->selection_start : obj->selection_end;
+
+    if (obj->role == BRIDGE_ROLE_PASSWORD_TEXT)
+    {
+        /* Like GTK, show the hidden text as one mask character each. */
+        for (i = 0; i < n; i++)
+            buf[i] = '*';
+    }
+    for (src = dst = buf; *src; src++)
+        if (src[0] != '\r' || src[1] != '\n')
+            *dst++ = *src;
+    *dst = 0;
+    size = WideCharToMultiByte(CP_UTF8, 0, buf, -1, NULL, 0, NULL, NULL);
+    str->text = HeapAlloc(GetProcessHeap(), 0, size > 0 ? size : 1);
+    if (str->text)
+    {
+        str->text[0] = 0;
+        WideCharToMultiByte(CP_UTF8, 0, buf, -1, str->text, size, NULL, NULL);
+        obj->text = str->text;
+    }
+    HeapFree(GetProcessHeap(), 0, buf);
+}
+
+static BOOL has_edit_text(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"Edit") || !lstrcmpiW(cls, L"RICHEDIT50W") ||
+           !lstrcmpiW(cls, L"RichEdit20A") || !lstrcmpiW(cls, L"RichEdit20W");
+}
+
 static void get_class(HWND hwnd, WCHAR *cls, int len, char *dst, int size)
 {
     if (!GetClassNameW(hwnd, cls, len))
@@ -287,6 +388,8 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
     obj->window_class = str->object_class;
+    obj->text = NULL;
+    str->text = NULL;
     VariantInit(&child);
     if (FAILED(AccessibleObjectFromEvent(hwnd, id_object, id_child, &acc, &child)) || !acc)
         return FALSE;
@@ -316,6 +419,10 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         obj->role = BRIDGE_ROLE_PANEL;
     if (obj->role == BRIDGE_ROLE_TEXT)
         refine_text(hwnd, msaa_state, obj);
+    if (!obj->child && has_edit_text(cls) &&
+        (obj->role == BRIDGE_ROLE_TEXT || obj->role == BRIDGE_ROLE_ENTRY ||
+         obj->role == BRIDGE_ROLE_PASSWORD_TEXT))
+        describe_edit_text(hwnd, obj, str);
     if (obj->role == BRIDGE_ROLE_COMBO_BOX)
     {
         /*
@@ -381,6 +488,7 @@ static struct
     LONG id_object;
     LONG id_child;
     DWORD pid;
+    BOOL recovered;     /* reported by check_missed_focus, not by an event */
 } last_focus;
 
 static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
@@ -404,6 +512,7 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     focus.app_name = str.app;
     atspi_post_focus(&focus);
     trace(L"focus: %p %ld %ld name \"%S\"", hwnd, id_object, id_child, focus.object.name);
+    free_strings(&str);
 
     last_focus.hwnd = hwnd;
     last_focus.id_object = id_object;
@@ -432,6 +541,43 @@ static BOOL check_list_caret(HWND hwnd)
 }
 
 /*
+ * A focus event can get lost: the Save changes? message box after Alt+F4
+ * reported none (WSLg, 2026-11-06), so Orca stayed silent until the next
+ * key. Like NVDA, compare the real focus of the foreground thread with the
+ * last reported one and report it if they differ. The late event, if it
+ * still comes, is then dropped in win_event_proc.
+ */
+static BOOL check_missed_focus(void)
+{
+    HWND foreground = GetForegroundWindow();
+    GUITHREADINFO gti;
+
+    memset(&gti, 0, sizeof(gti));
+    gti.cbSize = sizeof(gti);
+    if (!foreground || !GetGUIThreadInfo(GetWindowThreadProcessId(foreground, NULL), &gti) ||
+        (gti.flags & GUI_INMENUMODE) || !gti.hwndFocus || gti.hwndFocus == last_focus.hwnd)
+        return FALSE;
+    trace(L"missed focus: %p", gti.hwndFocus);
+    on_focus(gti.hwndFocus, OBJID_CLIENT, CHILDID_SELF);
+    if (last_focus.hwnd != gti.hwndFocus)
+        return FALSE;
+    last_focus.recovered = TRUE;
+    return TRUE;
+}
+
+/* Delay after a foreground change, so the new window has set its focus. */
+#define FOREGROUND_CHECK_DELAY_MS 100
+
+static UINT_PTR foreground_timer;
+
+static void CALLBACK check_after_foreground(HWND unused, UINT msg, UINT_PTR id, DWORD time)
+{
+    KillTimer(NULL, id);
+    foreground_timer = 0;
+    check_missed_focus();
+}
+
+/*
  * Wine emits no WinEvent when a key changes a combo box, a list box
  * selection or a user32 Edit. Like NVDA, look at the focused object again
  * shortly after each key, once the target has handled it.
@@ -450,13 +596,17 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
     KillTimer(NULL, id);
     key_timer = 0;
     if (!hwnd || !IsWindow(hwnd))
+    {
+        check_missed_focus();
         return;
+    }
     memset(&gti, 0, sizeof(gti));
     gti.cbSize = sizeof(gti);
-    /* Focus moved elsewhere: its own focus event will tell. */
+    /* Focus moved elsewhere: normally its own focus event tells. */
     if (!GetGUIThreadInfo(GetWindowThreadProcessId(hwnd, NULL), &gti) || gti.hwndFocus != hwnd)
     {
         trace(L"key check: focus %p is not %p", gti.hwndFocus, hwnd);
+        check_missed_focus();
         return;
     }
     if (check_list_caret(hwnd))
@@ -464,18 +614,165 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
     memset(&obj, 0, sizeof(obj));
     if (!describe_object(hwnd, last_focus.id_object, last_focus.id_child, &obj, &str))
         return;
-    trace(L"key check: %p %ld %ld name \"%S\" value \"%S\"", hwnd, last_focus.id_object,
-          last_focus.id_child, obj.name, obj.value ? obj.value : "");
+    trace(L"key check: %p %ld %ld name \"%S\" value \"%S\" caret %d", hwnd,
+          last_focus.id_object, last_focus.id_child, obj.name, obj.value ? obj.value : "",
+          obj.text ? obj.caret : -1);
     atspi_post_update(last_focus.pid, &obj);
+    free_strings(&str);
+}
+
+/* X keysym and name of keys that type no text. */
+static const struct { BYTE vk; unsigned int keysym; const char *name; } special_keys[] =
+{
+    { VK_BACK, 0xff08, "BackSpace" }, { VK_TAB, 0xff09, "Tab" },
+    { VK_RETURN, 0xff0d, "Return" }, { VK_PAUSE, 0xff13, "Pause" },
+    { VK_ESCAPE, 0xff1b, "Escape" }, { VK_HOME, 0xff50, "Home" },
+    { VK_LEFT, 0xff51, "Left" }, { VK_UP, 0xff52, "Up" },
+    { VK_RIGHT, 0xff53, "Right" }, { VK_DOWN, 0xff54, "Down" },
+    { VK_PRIOR, 0xff55, "Prior" }, { VK_NEXT, 0xff56, "Next" },
+    { VK_END, 0xff57, "End" }, { VK_INSERT, 0xff63, "Insert" },
+    { VK_APPS, 0xff67, "Menu" }, { VK_NUMLOCK, 0xff7f, "Num_Lock" },
+    { VK_SCROLL, 0xff14, "Scroll_Lock" }, { VK_DELETE, 0xffff, "Delete" },
+    { VK_LSHIFT, 0xffe1, "Shift_L" }, { VK_RSHIFT, 0xffe2, "Shift_R" },
+    { VK_LCONTROL, 0xffe3, "Control_L" }, { VK_RCONTROL, 0xffe4, "Control_R" },
+    { VK_CAPITAL, 0xffe5, "Caps_Lock" }, { VK_LMENU, 0xffe9, "Alt_L" },
+    /* Right Alt is AltGr on most non-US layouts, Slovak included. */
+    { VK_RMENU, 0xfe03, "ISO_Level3_Shift" }, { VK_LWIN, 0xffeb, "Super_L" },
+    { VK_RWIN, 0xffec, "Super_R" },
+};
+
+/* X modifier masks. */
+#define X_SHIFT_MASK 0x01
+#define X_CONTROL_MASK 0x04
+#define X_MOD1_MASK 0x08    /* Alt */
+#define X_MOD4_MASK 0x40    /* Super */
+#define X_MOD5_MASK 0x80    /* ISO_Level3_Shift (AltGr) */
+
+static BOOL key_down(int vk)
+{
+    return GetAsyncKeyState(vk) < 0;
+}
+
+/*
+ * X keycode (evdev code + 8) from a PC set 1 scan code, which is what
+ * Wine puts into KBDLLHOOKSTRUCT. Extended keys have their own codes.
+ */
+static unsigned int x_keycode(const KBDLLHOOKSTRUCT *kb)
+{
+    static const struct { BYTE scan; BYTE evdev; } extended[] =
+    {
+        { 0x1c, 96 }, { 0x1d, 97 }, { 0x35, 98 }, { 0x38, 100 }, { 0x47, 102 },
+        { 0x48, 103 }, { 0x49, 104 }, { 0x4b, 105 }, { 0x4d, 106 }, { 0x4f, 107 },
+        { 0x50, 108 }, { 0x51, 109 }, { 0x52, 110 }, { 0x53, 111 }, { 0x5b, 125 },
+        { 0x5c, 126 }, { 0x5d, 127 },
+    };
+    unsigned int i;
+
+    if (kb->flags & LLKHF_EXTENDED)
+    {
+        for (i = 0; i < ARRAYSIZE(extended); i++)
+            if (extended[i].scan == kb->scanCode)
+                return extended[i].evdev + 8;
+    }
+    return kb->scanCode + 8;
+}
+
+/*
+ * Reports the key to the AT-SPI side the way GTK's atk-bridge does, so a
+ * screen reader without its own keyboard source learns about it. The
+ * text comes from ToUnicodeEx with only Shift and AltGr: control keys
+ * should still be named by their letter.
+ */
+static void report_key(WPARAM msg, const KBDLLHOOKSTRUCT *kb)
+{
+    struct bridge_key key;
+    char utf8[16];
+    WCHAR text[4];
+    BYTE state[256];
+    BOOL altgr = key_down(VK_RMENU);
+    unsigned int i;
+    int len;
+
+    memset(&key, 0, sizeof(key));
+    key.pressed = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+    key.keycode = x_keycode(kb);
+    key.timestamp = kb->time;
+    if (key_down(VK_SHIFT))
+        key.modifiers |= X_SHIFT_MASK;
+    if (key_down(VK_CONTROL) && !altgr)
+        key.modifiers |= X_CONTROL_MASK;
+    if (key_down(VK_LMENU))
+        key.modifiers |= X_MOD1_MASK;
+    if (altgr)
+        key.modifiers |= X_MOD5_MASK;
+    if (key_down(VK_LWIN) || key_down(VK_RWIN))
+        key.modifiers |= X_MOD4_MASK;
+
+    for (i = 0; i < ARRAYSIZE(special_keys); i++)
+        if (special_keys[i].vk == kb->vkCode)
+            break;
+    if (i < ARRAYSIZE(special_keys))
+    {
+        key.keysym = special_keys[i].keysym;
+        key.string = special_keys[i].name;
+        /* X sends ISO_Left_Tab for Shift+Tab. */
+        if (kb->vkCode == VK_TAB && (key.modifiers & X_SHIFT_MASK))
+            key.keysym = 0xfe20, key.string = "ISO_Left_Tab";
+    }
+    else if (kb->vkCode >= VK_F1 && kb->vkCode <= VK_F24)
+    {
+        key.keysym = 0xffbe + kb->vkCode - VK_F1;
+        wsprintfA(utf8, "F%u", (unsigned int)(kb->vkCode - VK_F1 + 1));
+        key.string = utf8;
+    }
+    else if (kb->vkCode == VK_PACKET)
+    {
+        /*
+         * SendInput with KEYEVENTF_UNICODE: the scan code is the character.
+         * The registry drops keycode 0, so take the key of the layout.
+         */
+        SHORT vk = VkKeyScanW(kb->scanCode);
+
+        text[0] = kb->scanCode;
+        text[1] = 0;
+        key.keycode = vk == -1 ? 0 : MapVirtualKeyW(LOBYTE(vk), MAPVK_VK_TO_VSC) + 8;
+        key.keysym = text[0] < 0x100 ? text[0] : 0x1000000 + text[0];
+        to_utf8(text, utf8, sizeof(utf8));
+        key.string = utf8;
+        key.is_text = TRUE;
+    }
+    else
+    {
+        memset(state, 0, sizeof(state));
+        if (key.modifiers & X_SHIFT_MASK)
+            state[VK_SHIFT] = 0x80;
+        if (altgr)
+            state[VK_CONTROL] = state[VK_MENU] = 0x80;
+        len = ToUnicodeEx(kb->vkCode, kb->scanCode, state, text, ARRAYSIZE(text), 0x4,
+                          GetKeyboardLayout(0));
+        if (len < 1 || text[0] < 0x20)
+            return;
+        /* Keysyms equal Latin-1 code points; others are 0x1000000 + code point. */
+        key.keysym = text[0] < 0x100 ? text[0] : 0x1000000 + text[0];
+        text[1] = 0;
+        to_utf8(text, utf8, sizeof(utf8));
+        key.string = utf8;
+        key.is_text = !(key.modifiers & (X_CONTROL_MASK | X_MOD1_MASK | X_MOD4_MASK));
+    }
+    atspi_post_key(&key);
 }
 
 static LRESULT CALLBACK keyboard_proc(int code, WPARAM wparam, LPARAM lparam)
 {
-    /* The key has not reached the target yet; check after a short delay. */
-    if (code == HC_ACTION && (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN))
+    if (code == HC_ACTION)
     {
-        trace(L"key %lu", ((KBDLLHOOKSTRUCT *)lparam)->vkCode);
-        key_timer = SetTimer(NULL, key_timer, KEY_CHECK_DELAY_MS, check_after_key);
+        report_key(wparam, (KBDLLHOOKSTRUCT *)lparam);
+        /* The key has not reached the target yet; check after a short delay. */
+        if (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)
+        {
+            trace(L"key %lu", ((KBDLLHOOKSTRUCT *)lparam)->vkCode);
+            key_timer = SetTimer(NULL, key_timer, KEY_CHECK_DELAY_MS, check_after_key);
+        }
     }
     return CallNextHookEx(NULL, code, wparam, lparam);
 }
@@ -489,7 +786,19 @@ static void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     switch (event)
     {
     case EVENT_OBJECT_FOCUS:
+        if (last_focus.recovered && hwnd == last_focus.hwnd &&
+            id_object == last_focus.id_object && id_child == last_focus.id_child)
+        {
+            /* Already reported by check_missed_focus. */
+            last_focus.recovered = FALSE;
+            break;
+        }
+        last_focus.recovered = FALSE;
         on_focus(hwnd, id_object, id_child);
+        break;
+    case EVENT_SYSTEM_FOREGROUND:
+        foreground_timer = SetTimer(NULL, foreground_timer, FOREGROUND_CHECK_DELAY_MS,
+                                    check_after_foreground);
         break;
     case EVENT_OBJECT_HIDE:
     case EVENT_OBJECT_DESTROY:
@@ -512,7 +821,7 @@ static DWORD WINAPI atspi_thread(void *arg)
 
 int main(void)
 {
-    HWINEVENTHOOK hook;
+    HWINEVENTHOOK hook, foreground_hook;
     HHOOK keyboard;
     HANDLE thread;
     MSG msg;
@@ -531,6 +840,11 @@ int main(void)
                            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     if (!hook)
         return 1;
+    foreground_hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL,
+                                      win_event_proc, 0, 0,
+                                      WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    if (!foreground_hook)
+        return 1;
     keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, GetModuleHandleW(NULL), 0);
     if (!keyboard)
         return 1;
@@ -541,6 +855,7 @@ int main(void)
         DispatchMessageW(&msg);
     }
     UnhookWindowsHookEx(keyboard);
+    UnhookWinEvent(foreground_hook);
     UnhookWinEvent(hook);
     CoUninitialize();
     return 0;
