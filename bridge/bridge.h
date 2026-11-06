@@ -163,4 +163,11 @@ void atspi_post_key(const struct bridge_key *key);
  */
 void atspi_post_window_gone(unsigned long long hwnd);
 
+/*
+ * Reports that process pid has exited: its application leaves the
+ * desktop and its D-Bus connection is closed. Unknown processes are
+ * ignored. Callable from any thread.
+ */
+void atspi_post_app_gone(unsigned int pid);
+
 #endif

@@ -226,6 +226,7 @@ struct app
     gint32 id;
     GHashTable *nodes;      /* id -> struct node *, owned */
     struct node *root;
+    guint subtree_id;
 };
 
 static GMainContext *context;
@@ -929,6 +930,47 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
     return node;
 }
 
+static struct app *app_new(guint pid)
+{
+    struct app *app = g_new0(struct app, 1);
+
+    app->pid = pid;
+    app->nodes = g_hash_table_new(g_str_hash, g_str_equal);
+    return app;
+}
+
+/* Subtree user data destructor: no more D-Bus calls can reach app. */
+static void app_free(gpointer data)
+{
+    struct app *app = data;
+
+    g_hash_table_destroy(app->nodes);
+    g_free(app->parent_bus);
+    g_free(app->parent_path);
+    g_free(app);
+}
+
+/*
+ * Frees app, which is no longer in apps. Closing its connection makes
+ * the registry remove it from the desktop and tell the screen readers;
+ * with a subtree, app is freed once GDBus is done with it.
+ */
+static void app_close(struct app *app)
+{
+    if (app->root)
+        node_free(app->root);
+    app->root = NULL;
+    if (app->conn)
+    {
+        if (app->subtree_id)
+            g_dbus_connection_unregister_subtree(app->conn, app->subtree_id);
+        g_dbus_connection_close(app->conn, NULL, NULL, NULL);
+        g_clear_object(&app->conn);
+    }
+    if (!app->subtree_id)
+        app_free(app);
+}
+
 static struct app *get_app(guint pid, const char *name)
 {
     struct app *app = g_hash_table_lookup(apps, GUINT_TO_POINTER(pid));
@@ -938,9 +980,7 @@ static struct app *get_app(guint pid, const char *name)
     if (app)
         return app->conn ? app : NULL;
 
-    app = g_new0(struct app, 1);
-    app->pid = pid;
-    app->nodes = g_hash_table_new(g_str_hash, g_str_equal);
+    app = app_new(pid);
     app->root = node_new(app, "root", NULL);
     app->root->role = BRIDGE_ROLE_APPLICATION;
     app->root->name = g_strdup(name);
@@ -954,9 +994,10 @@ static struct app *get_app(guint pid, const char *name)
         NULL, NULL, &error);
     if (!app->conn)
         goto fail;
-    if (!g_dbus_connection_register_subtree(
-            app->conn, ATSPI_PREFIX, &subtree_vtable,
-            G_DBUS_SUBTREE_FLAGS_DISPATCH_TO_UNENUMERATED_NODES, app, NULL, &error))
+    app->subtree_id = g_dbus_connection_register_subtree(
+        app->conn, ATSPI_PREFIX, &subtree_vtable,
+        G_DBUS_SUBTREE_FLAGS_DISPATCH_TO_UNENUMERATED_NODES, app, app_free, &error);
+    if (!app->subtree_id)
         goto fail;
 
     ret = g_dbus_connection_call_sync(
@@ -977,7 +1018,9 @@ fail:
     g_printerr("wine-atspi: cannot register %s (pid %u): %s\n", name, pid,
                error->message);
     g_error_free(error);
-    g_clear_object(&app->conn);
+    /* Keep an empty app without a connection as the failure marker. */
+    g_hash_table_replace(apps, GUINT_TO_POINTER(pid), app_new(pid));
+    app_close(app);
     return NULL;
 }
 
@@ -1045,6 +1088,20 @@ static gboolean window_gone_idle(gpointer data)
         g_ptr_array_free(ids, TRUE);
     }
     g_free(prefix);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean app_gone_idle(gpointer data)
+{
+    struct app *app = g_hash_table_lookup(apps, data);
+
+    if (!app)
+        return G_SOURCE_REMOVE;
+    g_hash_table_remove(apps, data);
+    if (app->conn)
+        g_printerr("wine-atspi: pid %u exited, unregistering %s\n", app->pid,
+                   g_dbus_connection_get_unique_name(app->conn));
+    app_close(app);
     return G_SOURCE_REMOVE;
 }
 
@@ -1194,6 +1251,11 @@ void atspi_post_window_gone(unsigned long long hwnd)
 
     *data = hwnd;
     post(window_gone_idle, data, g_free);
+}
+
+void atspi_post_app_gone(unsigned int pid)
+{
+    post(app_gone_idle, GUINT_TO_POINTER(pid), NULL);
 }
 
 int atspi_init(void)

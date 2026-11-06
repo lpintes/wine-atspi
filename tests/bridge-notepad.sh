@@ -12,7 +12,7 @@ BUILD=build
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
-python3 tests/atspi-events.py 25 > "$LOG" 2>&1 &
+python3 tests/atspi-events.py 32 > "$LOG" 2>&1 &
 events=$!
 sleep 1
 wine notepad &
@@ -26,6 +26,7 @@ sleep 3
 # change its value.
 # The dialog is opened twice: once closed, it must leave the tree.
 # Alt+F4 must focus a button of the "save changes?" message box.
+# Return on "No" ends notepad: its application must leave the desktop.
 timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \
     t:"Hello" w:300 k:return w:300 t:"second line" w:300 \
     k:up w:300 k:ctrl+left w:300 k:ctrl+right w:300 k:shift+home w:300 \
@@ -35,9 +36,16 @@ timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \
     k:escape w:1000 t:" world" w:500 \
     k:ctrl+o w:3000 k:escape w:1000 \
     k:alt+f4 w:1500 k:right w:500
+python3 tests/atspi-dump.py notepad > $BUILD/dump-running.log 2>&1
+timeout 10 wine $BUILD/sendkeys.exe.so k:return w:2000
 
 wait $events
-python3 tests/atspi-dump.py notepad >> "$LOG" 2>&1
+{
+    echo "--- tree before exit"
+    cat $BUILD/dump-running.log
+    echo "--- applications after exit"
+    python3 tests/atspi-dump.py
+} >> "$LOG" 2>&1
 kill $bridge
 wineserver -k
 wait

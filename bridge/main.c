@@ -422,7 +422,6 @@ static void find_label(HWND hwnd, char *dst, int size)
 {
     WCHAR cls[64], buf[NAME_MAX_UTF8 / 3];
     HWND parent, cur;
-    DWORD_PTR len;
     int i, j;
 
     dst[0] = 0;
@@ -437,11 +436,12 @@ static void find_label(HWND hwnd, char *dst, int size)
             return;
         if (!is_text_static(cur))
             continue;
-        if (!SendMessageTimeoutW(cur, WM_GETTEXT, ARRAYSIZE(buf), (LPARAM)buf,
-                                 SMTO_ABORTIFHUNG, 500, &len))
-            return;
-        buf[min(len, ARRAYSIZE(buf) - 1)] = 0;
-        if (!buf[0])
+        /*
+         * No WM_GETTEXT: the dialog thread may be busy (the Open dialog
+         * refills its file list after a file type change) and a timeout
+         * would lose the label. A Static keeps its text in the window.
+         */
+        if (!InternalGetWindowText(cur, buf, ARRAYSIZE(buf)))
             continue;
         break;
     }
@@ -574,6 +574,69 @@ static BOOL is_stale_focus(HWND hwnd, LONG id_object, LONG id_child)
     return gti.hwndFocus && gti.hwndFocus != hwnd;
 }
 
+/*
+ * Processes whose application is on the AT-SPI side. A thread pool wait
+ * tells the main thread with WM_PROCESS_EXITED when one of them ends.
+ */
+#define WM_PROCESS_EXITED (WM_APP + 1)
+#define MAX_WATCHED 256
+
+static DWORD main_thread_id;
+static struct
+{
+    DWORD pid;
+    HANDLE process;
+    HANDLE wait;
+} watched[MAX_WATCHED];
+
+static void CALLBACK process_exited(void *arg, BOOLEAN timed_out)
+{
+    PostThreadMessageW(main_thread_id, WM_PROCESS_EXITED, (WPARAM)arg, 0);
+}
+
+static void watch_process(DWORD pid)
+{
+    int i, free_slot = -1;
+    HANDLE process;
+
+    for (i = 0; i < MAX_WATCHED; i++)
+    {
+        if (watched[i].pid == pid)
+            return;
+        if (!watched[i].pid && free_slot < 0)
+            free_slot = i;
+    }
+    if (free_slot < 0)
+        return;
+    process = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (!process)
+        return;
+    if (!RegisterWaitForSingleObject(&watched[free_slot].wait, process, process_exited,
+                                     (void *)(ULONG_PTR)pid, INFINITE, WT_EXECUTEONLYONCE))
+    {
+        CloseHandle(process);
+        return;
+    }
+    watched[free_slot].pid = pid;
+    watched[free_slot].process = process;
+}
+
+static void on_process_exited(DWORD pid)
+{
+    int i;
+
+    for (i = 0; i < MAX_WATCHED; i++)
+    {
+        if (watched[i].pid != pid)
+            continue;
+        UnregisterWait(watched[i].wait);
+        CloseHandle(watched[i].process);
+        watched[i].pid = 0;
+    }
+    trace(L"process %lu exited", pid);
+    atspi_post_app_gone(pid);
+}
+
 /* The object of the last focus event, checked again after each key. */
 static struct
 {
@@ -603,6 +666,7 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     focus.pid = pid;
     get_app_name(pid, str.app, sizeof(str.app));
     focus.app_name = str.app;
+    watch_process(pid);
     atspi_post_focus(&focus);
     trace(L"focus: %p %ld %ld name \"%S\"", hwnd, id_object, id_child, focus.object.name);
     free_strings(&str);
@@ -931,6 +995,7 @@ int main(void)
     MSG msg;
 
     debug = GetEnvironmentVariableW(L"WINE_ATSPI_DEBUG", NULL, 0) > 0;
+    main_thread_id = GetCurrentThreadId();
     if (atspi_init())
         return 1;
     thread = CreateThread(NULL, 0, atspi_thread, NULL, 0, NULL);
@@ -955,6 +1020,11 @@ int main(void)
 
     while (GetMessageW(&msg, NULL, 0, 0) > 0)
     {
+        if (!msg.hwnd && msg.message == WM_PROCESS_EXITED)
+        {
+            on_process_exited((DWORD)msg.wParam);
+            continue;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
