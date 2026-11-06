@@ -32,9 +32,16 @@ EVENTS = [
 def describe(obj):
     try:
         text = "%s %r" % (obj.get_role_name(), obj.get_name())
-        value = (obj.get_attributes() or {}).get("valuetext")
+        attrs = obj.get_attributes() or {}
+        value = attrs.get("valuetext")
         if value is not None:
             text += " value=%r" % value
+        if "posinset" in attrs:
+            text += " %s/%s" % (attrs["posinset"], attrs.get("setsize"))
+        elif "setsize" in attrs:
+            text += " %s items" % attrs["setsize"]
+        if obj.get_state_set().contains(Atspi.StateType.SELECTED):
+            text += " selected"
         text += describe_text(obj)
         return text
     except GLib.Error as e:

@@ -54,6 +54,7 @@ enum bridge_role
     BRIDGE_ROLE_LINK = 88,
     BRIDGE_ROLE_TABLE_ROW = 90,
     BRIDGE_ROLE_TREE_ITEM = 91,
+    BRIDGE_ROLE_LIST_BOX = 98,
     BRIDGE_ROLE_GROUPING = 99,
 };
 
@@ -103,6 +104,12 @@ struct bridge_object
     int caret;
     int selection_start;
     int selection_end;
+    /*
+     * Position among the items of a list, from 1; 0 if not an item.
+     * set_size counts the items, also for the list itself; 0 if unknown.
+     */
+    int position;
+    int set_size;
 };
 
 /* Focus moved to object, which lives in top-level window frame. */

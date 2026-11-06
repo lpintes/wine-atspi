@@ -25,6 +25,8 @@ sleep 3
 # must be named by their labels. Down in the file type combo box must
 # change its value.
 # The dialog is opened twice: once closed, it must leave the tree.
+# The second time shift+tab goes to the file list (SysListView32); Down
+# must focus the next file with its position ("2/9").
 # Alt+F4 must focus a button of the "save changes?" message box.
 # Return on "No" ends notepad: its application must leave the desktop.
 timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \
@@ -34,7 +36,7 @@ timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \
     k:ctrl+o w:1500 k:tab w:500 k:down w:500 k:up w:500 \
     k:tab w:500 k:tab w:500 \
     k:escape w:1000 t:" world" w:500 \
-    k:ctrl+o w:3000 k:escape w:1000 \
+    k:ctrl+o w:3000 k:shift+tab w:500 k:down w:1500 k:down w:1500 k:escape w:1000 \
     k:alt+f4 w:1500 k:right w:500
 python3 tests/atspi-dump.py notepad > $BUILD/dump-running.log 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so k:return w:2000

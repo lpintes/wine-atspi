@@ -172,6 +172,15 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   The bridge's `find_label` does it for them: climb out of `ComboBox` /
   `ComboBoxEx32`, skip hidden windows and empty or picture `Static`s,
   take the nearest text `Static`, drop the `&` of the mnemonic.
+- Wine's `oleacc` has only stubs for most classes: in `client.c`
+  `classes[]` only `Edit` has its own vtbl. `SysListView32` items are
+  therefore read with `LVM_GETNEXTITEM` (`LVNI_FOCUSED`),
+  `LVM_GETITEMSTATE`, `LVM_GETITEMCOUNT` and `LVM_GETITEMTEXTW` through
+  memory in the target (`get_listview_text`). Orca says "x of y" from
+  the attributes `posinset` (from 1) and `setsize` (`ax_utilities.py`).
+- After an arrow key in the Open dialog's file list the dialog thread is
+  busy for 0.3 to over 0.5 s (WSL, folder on `/mnt/c`), so list view
+  queries can time out; the key check retries a busy list.
 - `atspi.c` uses only GLib functions, never libc ones directly. The
   binary imports msvcrt through Wine, and a libc name could bind to an
   ms_abi msvcrt thunk. Not proven to break, just avoided.
@@ -191,6 +200,13 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
 - `object:selection-changed` whose source is the focused combo box makes
   Orca present the combo box again (`_on_selection_changed`). The bridge
   emits it when the combo value changes.
+- Orca never speaks the role of a focused `list` (`_should_speak_role`
+  drops LIST and LIST_ITEM outside Where Am I); an unnamed list then
+  gives no speech at all. For a `list box` it says "n items" from the
+  attribute `setsize`, or the role if there is no count
+  (`_generate_list_box`). The bridge reports a list view without a
+  focused item as a list box. Speaking "x of y" for items is off by
+  default (`speak-position-in-set`).
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it

@@ -215,6 +215,8 @@ struct node
     gint caret;
     gint selection_start;
     gint selection_end;
+    gint position;          /* from 1, 0 if not a list item */
+    gint set_size;
 };
 
 struct app
@@ -616,6 +618,25 @@ static void method_call(GDBusConnection *conn, const char *sender,
         /* Orca takes a combo box value from here (generator.py). */
         if (node->value)
             g_variant_builder_add(&b, "{ss}", "valuetext", node->value);
+        /*
+         * Orca says "x of y" for an item from these (ax_utilities.py) and
+         * "n items" for a focused list from its setsize; it never speaks
+         * the role of a focused list (speech_generator.py).
+         */
+        if (node->position > 0)
+        {
+            char num[16];
+
+            g_snprintf(num, sizeof(num), "%d", node->position);
+            g_variant_builder_add(&b, "{ss}", "posinset", num);
+        }
+        if (node->set_size > 0)
+        {
+            char num[16];
+
+            g_snprintf(num, sizeof(num), "%d", node->set_size);
+            g_variant_builder_add(&b, "{ss}", "setsize", num);
+        }
         ret = g_variant_new("(a{ss})", &b);
     }
     else if (!g_strcmp0(method, "GetApplication"))
@@ -879,6 +900,8 @@ static void update_node(struct node *node, const struct bridge_object *obj)
     guint state;
 
     node->role = obj->role;
+    node->position = obj->position;
+    node->set_size = obj->set_size;
     if (g_strcmp0(node->window_class, obj->window_class))
     {
         g_free(node->window_class);
@@ -921,6 +944,8 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         node->name = g_strdup(obj->name);
         node->value = g_strdup(obj->value);
         node->window_class = g_strdup(obj->window_class);
+        node->position = obj->position;
+        node->set_size = obj->set_size;
         if (obj->text)
             set_text(node, obj, FALSE);
     }

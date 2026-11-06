@@ -11,6 +11,7 @@
 /* Wine's libuuid lacks IID_IAccessible, so define it here. */
 #include <initguid.h>
 #include <oleacc.h>
+#include <commctrl.h>
 
 #include "bridge.h"
 
@@ -464,6 +465,135 @@ static void find_label(HWND hwnd, char *dst, int size)
     to_utf8(buf, dst, size);
 }
 
+/* LVITEMW as a 32-bit (WoW64) process sees it, up to cchTextMax. */
+struct lvitem32
+{
+    UINT mask;
+    int iItem;
+    int iSubItem;
+    UINT state;
+    UINT stateMask;
+    ULONG pszText;
+    int cchTextMax;
+};
+
+/* Room for the item structure in front of the text in the target. */
+#define REMOTE_HEADER 128
+
+/*
+ * Wine does not marshal LVM_GETITEMTEXTW across processes. Like NVDA,
+ * put the LVITEMW and its text buffer into the target's memory.
+ */
+static BOOL get_listview_text(HWND hwnd, int item, WCHAR *buf, int len)
+{
+    BYTE header[REMOTE_HEADER];
+    HANDLE process;
+    BOOL wow64 = FALSE, ok = FALSE;
+    DWORD_PTR copied = 0;
+    DWORD pid = 0;
+    SIZE_T done;
+    char *remote;
+
+    buf[0] = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE |
+                          PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process)
+        return FALSE;
+    IsWow64Process(process, &wow64);
+    remote = VirtualAllocEx(process, NULL, REMOTE_HEADER + len * sizeof(WCHAR),
+                            MEM_COMMIT, PAGE_READWRITE);
+    if (remote)
+    {
+        memset(header, 0, sizeof(header));
+        if (wow64)
+        {
+            struct lvitem32 *lv = (struct lvitem32 *)header;
+
+            lv->pszText = (ULONG)(ULONG_PTR)(remote + REMOTE_HEADER);
+            lv->cchTextMax = len;
+        }
+        else
+        {
+            LVITEMW *lv = (LVITEMW *)header;
+
+            lv->pszText = (WCHAR *)(remote + REMOTE_HEADER);
+            lv->cchTextMax = len;
+        }
+        if (WriteProcessMemory(process, remote, header, sizeof(header), &done) &&
+            SendMessageTimeoutW(hwnd, LVM_GETITEMTEXTW, item, (LPARAM)remote,
+                                SMTO_ABORTIFHUNG, 500, &copied) &&
+            ReadProcessMemory(process, remote + REMOTE_HEADER, buf, len * sizeof(WCHAR), &done))
+        {
+            buf[len - 1] = 0;
+            ok = TRUE;
+        }
+        VirtualFreeEx(process, remote, 0, MEM_RELEASE);
+    }
+    CloseHandle(process);
+    return ok;
+}
+
+/*
+ * Index of the focused item of a list view, -1 if none. LIST_BUSY if the
+ * target did not answer in time: the Open dialog's list keeps its thread
+ * busy for over 500 ms after an arrow key (WSL, 2026-11-06).
+ */
+#define LIST_BUSY (-2)
+
+static int listview_focus(HWND hwnd)
+{
+    DWORD_PTR item = (DWORD_PTR)-1;
+
+    if (!SendMessageTimeoutW(hwnd, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED,
+                             SMTO_ABORTIFHUNG, 500, &item))
+        return LIST_BUSY;
+    return (int)item;
+}
+
+/*
+ * Wine's oleacc has only a stub for SysListView32, and the list view
+ * emits no focus or selection events, so describe the item through list
+ * view messages. The MSAA child id is item + 1, as on Windows. FALSE if
+ * the text could not be read.
+ */
+static BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *obj,
+                                   struct focus_strings *str)
+{
+    WCHAR text[NAME_MAX_UTF8 / 3];
+    DWORD_PTR state = 0, count = 0;
+
+    if (!get_listview_text(hwnd, item, text, ARRAYSIZE(text)))
+        return FALSE;
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = item + 1;
+    obj->role = BRIDGE_ROLE_LIST_ITEM;
+    obj->value = NULL;
+    to_utf8(text, str->object, sizeof(str->object));
+    obj->name = str->object;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE);
+    SendMessageTimeoutW(hwnd, LVM_GETITEMSTATE, item, LVIS_FOCUSED | LVIS_SELECTED,
+                        SMTO_ABORTIFHUNG, 500, &state);
+    if (state & LVIS_FOCUSED)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
+    if (state & LVIS_SELECTED)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count);
+    obj->position = item + 1;
+    obj->set_size = (int)count;
+    return TRUE;
+}
+
+static BOOL is_list_box(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"ListBox") || !lstrcmpiW(cls, L"ComboLBox");
+}
+
 /*
  * Fills obj from MSAA and the window class; the strings point into str.
  * FALSE if MSAA failed.
@@ -476,11 +606,21 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     BSTR name = NULL;
     LONG msaa_state = 0;
     WCHAR cls[256];
+    BOOL listview;
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
     obj->window_class = str->object_class;
     obj->text = NULL;
     str->text = NULL;
+    obj->position = obj->set_size = 0;
+    listview = id_object == OBJID_CLIENT && !lstrcmpiW(cls, L"SysListView32");
+    if (listview)
+    {
+        int item = id_child > 0 ? id_child - 1 : listview_focus(hwnd);
+
+        if (item >= 0)
+            return describe_listview_item(hwnd, item, obj, str);
+    }
     VariantInit(&child);
     if (FAILED(AccessibleObjectFromEvent(hwnd, id_object, id_child, &acc, &child)) || !acc)
         return FALSE;
@@ -527,6 +667,33 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     }
     if (!str->object[0] && !obj->child && needs_label(obj->role))
         find_label(hwnd, str->object, sizeof(str->object));
+    if (obj->child && is_list_box(cls))
+    {
+        DWORD_PTR count = 0;
+
+        if (SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) &&
+            (LONG)count > 0)
+        {
+            obj->position = obj->child;
+            obj->set_size = (int)count;
+        }
+    }
+    if (listview)
+    {
+        /*
+         * No focused item, so the list itself is presented. Orca never
+         * speaks the role of a focused "list" and says nothing for an
+         * unnamed one; for a "list box" it says "n items" from setsize,
+         * or the role if the list is empty (speech_generator.py).
+         */
+        DWORD_PTR count = 0;
+
+        obj->role = BRIDGE_ROLE_LIST_BOX;
+        if (!(GetWindowLongW(hwnd, GWL_STYLE) & LVS_SINGLESEL))
+            obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_MULTISELECTABLE);
+        if (SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+            obj->set_size = (int)count;
+    }
 
     SysFreeString(name);
     VariantClear(&role);
@@ -673,25 +840,36 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 
     last_focus.hwnd = hwnd;
     last_focus.id_object = id_object;
-    last_focus.id_child = id_child;
+    /* A list view's own focus event stands for its focused item. */
+    last_focus.id_child = id_child ? id_child : (LONG)focus.object.child;
     last_focus.pid = pid;
 }
 
 /*
  * Wine's ListBox moves its caret on arrow keys without a focus event
- * (listbox.c, LISTBOX_HandleKeyDown). Reports the new item as focused;
- * FALSE if hwnd is no list box or the caret did not move.
+ * (listbox.c, LISTBOX_HandleKeyDown), and SysListView32 emits no focus
+ * events at all. Reports the new item as focused and returns TRUE.
+ * FALSE if hwnd is no list or the caret did not move, LIST_BUSY if the
+ * list did not answer.
  */
-static BOOL check_list_caret(HWND hwnd)
+static int check_list_caret(HWND hwnd)
 {
     WCHAR cls[256];
     DWORD_PTR caret = LB_ERR;
 
-    if (last_focus.id_object != OBJID_CLIENT || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
-        (lstrcmpiW(cls, L"ListBox") && lstrcmpiW(cls, L"ComboLBox")))
+    if (last_focus.id_object != OBJID_CLIENT || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)))
         return FALSE;
-    if (!SendMessageTimeoutW(hwnd, LB_GETCARETINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &caret) ||
-        (LONG)caret == LB_ERR || (LONG)caret + 1 == last_focus.id_child)
+    if (!lstrcmpiW(cls, L"SysListView32"))
+    {
+        caret = listview_focus(hwnd);
+        if ((LONG)caret == LIST_BUSY)
+            return LIST_BUSY;
+    }
+    else if (!is_list_box(cls))
+        return FALSE;
+    else if (!SendMessageTimeoutW(hwnd, LB_GETCARETINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &caret))
+        return LIST_BUSY;
+    if ((LONG)caret < 0 || (LONG)caret + 1 == last_focus.id_child)
         return FALSE;
     on_focus(hwnd, OBJID_CLIENT, (LONG)caret + 1);
     return TRUE;
@@ -704,11 +882,16 @@ static BOOL check_list_caret(HWND hwnd)
  * last reported one and report it if they differ. The late event, if it
  * still comes, is then dropped in win_event_proc.
  */
+static UINT_PTR focus_timer;   /* a focus event waits, see FOCUS_SETTLE_MS */
+
 static BOOL check_missed_focus(void)
 {
     HWND foreground = GetForegroundWindow();
     GUITHREADINFO gti;
 
+    /* A focus event is about to be reported anyway. */
+    if (focus_timer)
+        return FALSE;
     memset(&gti, 0, sizeof(gti));
     gti.cbSize = sizeof(gti);
     if (!foreground || !GetGUIThreadInfo(GetWindowThreadProcessId(foreground, NULL), &gti) ||
@@ -720,6 +903,45 @@ static BOOL check_missed_focus(void)
         return FALSE;
     last_focus.recovered = TRUE;
     return TRUE;
+}
+
+/*
+ * Focus events wait this long for a following one. Shift+Tab into the
+ * Open dialog's file list gives list, its SHELLDLL_DefView parent, list
+ * again within a few milliseconds (Wine 11.21), and Orca then said
+ * nothing; only the focus that stays is reported.
+ */
+#define FOCUS_SETTLE_MS 30
+
+static struct
+{
+    HWND hwnd;
+    LONG id_object;
+    LONG id_child;
+} pending_focus;
+
+static void CALLBACK report_pending_focus(HWND unused, UINT msg, UINT_PTR id, DWORD time)
+{
+    HWND hwnd = pending_focus.hwnd;
+    LONG id_object = pending_focus.id_object, id_child = pending_focus.id_child;
+
+    KillTimer(NULL, id);
+    focus_timer = 0;
+    if (last_focus.recovered && hwnd == last_focus.hwnd &&
+        id_object == last_focus.id_object && id_child == last_focus.id_child)
+    {
+        /* Already reported by check_missed_focus. */
+        last_focus.recovered = FALSE;
+        return;
+    }
+    last_focus.recovered = FALSE;
+    if (is_stale_focus(hwnd, id_object, id_child))
+    {
+        trace(L"transient focus: %p", hwnd);
+        check_missed_focus();
+        return;
+    }
+    on_focus(hwnd, id_object, id_child);
 }
 
 /* Delay after a foreground change, so the new window has set its focus. */
@@ -740,8 +962,11 @@ static void CALLBACK check_after_foreground(HWND unused, UINT msg, UINT_PTR id, 
  * shortly after each key, once the target has handled it.
  */
 #define KEY_CHECK_DELAY_MS 50
+/* A busy target is asked again, up to this many times. */
+#define KEY_CHECK_RETRIES 5
 
 static UINT_PTR key_timer;
+static int key_retries;
 
 static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
 {
@@ -749,6 +974,7 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
     struct focus_strings str;
     GUITHREADINFO gti;
     HWND hwnd = last_focus.hwnd;
+    int list;
 
     KillTimer(NULL, id);
     key_timer = 0;
@@ -766,7 +992,14 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
         check_missed_focus();
         return;
     }
-    if (check_list_caret(hwnd))
+    list = check_list_caret(hwnd);
+    if (list == LIST_BUSY && key_retries++ < KEY_CHECK_RETRIES)
+    {
+        trace(L"key check: %p busy, retry %d", hwnd, key_retries);
+        key_timer = SetTimer(NULL, 0, KEY_CHECK_DELAY_MS, check_after_key);
+        return;
+    }
+    if (list)
         return;
     memset(&obj, 0, sizeof(obj));
     if (!describe_object(hwnd, last_focus.id_object, last_focus.id_child, &obj, &str))
@@ -939,6 +1172,7 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM wparam, LPARAM lparam)
         if (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)
         {
             trace(L"key %lu", ((KBDLLHOOKSTRUCT *)lparam)->vkCode);
+            key_retries = 0;
             key_timer = SetTimer(NULL, key_timer, KEY_CHECK_DELAY_MS, check_after_key);
         }
     }
@@ -954,15 +1188,10 @@ static void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     switch (event)
     {
     case EVENT_OBJECT_FOCUS:
-        if (last_focus.recovered && hwnd == last_focus.hwnd &&
-            id_object == last_focus.id_object && id_child == last_focus.id_child)
-        {
-            /* Already reported by check_missed_focus. */
-            last_focus.recovered = FALSE;
-            break;
-        }
-        last_focus.recovered = FALSE;
-        on_focus(hwnd, id_object, id_child);
+        pending_focus.hwnd = hwnd;
+        pending_focus.id_object = id_object;
+        pending_focus.id_child = id_child;
+        focus_timer = SetTimer(NULL, focus_timer, FOCUS_SETTLE_MS, report_pending_focus);
         break;
     case EVENT_SYSTEM_FOREGROUND:
         foreground_timer = SetTimer(NULL, foreground_timer, FOREGROUND_CHECK_DELAY_MS,
