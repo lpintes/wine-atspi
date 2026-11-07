@@ -39,7 +39,7 @@ $(BUILD)/sendkeys.exe.so: tools/sendkeys.c | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/sendkeys.exe $< -lshell32
 
 $(BUILD)/controls.exe.so: tests/controls.c | $(BUILD)
-	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/controls.exe $<
+	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/controls.exe $< -lcomctl32
 
 prefix:
 	test -d $(WINEPREFIX) || wineboot -i

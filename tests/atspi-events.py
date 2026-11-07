@@ -44,9 +44,31 @@ def describe(obj):
         if obj.get_state_set().contains(Atspi.StateType.SELECTED):
             text += " selected"
         text += describe_text(obj)
+        text += describe_table(obj)
         return text
     except GLib.Error as e:
         return "<%s>" % e.message
+
+
+def describe_table(obj):
+    """Size of a table; a cell's place, row and headers, as Orca reads a row."""
+    if obj.get_table_iface() is not None:
+        return " %dx%d" % (Atspi.Table.get_n_rows(obj), Atspi.Table.get_n_columns(obj))
+    if obj.get_table_cell() is None:
+        return ""
+    ok, row, column = Atspi.TableCell.get_position(obj)
+    table = Atspi.TableCell.get_table(obj)
+    if not ok or table is None:
+        return " cell?"
+    cells = []
+    headers = []
+    for i in range(Atspi.Table.get_n_columns(table)):
+        cell = Atspi.Table.get_accessible_at(table, row, i)
+        cells.append(cell.get_name() if cell is not None else None)
+        header = Atspi.Table.get_column_header(table, i)
+        headers.append(header.get_name() if header is not None else None)
+    own = [h.get_name() for h in Atspi.TableCell.get_column_header_cells(obj)]
+    return " cell=%d,%d row=%r headers=%r own=%r" % (row, column, cells, headers, own)
 
 
 def describe_text(obj):

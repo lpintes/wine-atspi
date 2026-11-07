@@ -184,11 +184,120 @@ static const char introspection_xml[] =
     "   <arg direction='out' type='b'/>"
     "  </method>"
     " </interface>"
+    " <interface name='org.a11y.atspi.Table'>"
+    "  <property name='NRows' type='i' access='read'/>"
+    "  <property name='NColumns' type='i' access='read'/>"
+    "  <property name='Caption' type='(so)' access='read'/>"
+    "  <property name='Summary' type='(so)' access='read'/>"
+    "  <property name='NSelectedRows' type='i' access='read'/>"
+    "  <property name='NSelectedColumns' type='i' access='read'/>"
+    "  <method name='GetAccessibleAt'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='(so)'/>"
+    "  </method>"
+    "  <method name='GetIndexAt'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetRowAtIndex'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetColumnAtIndex'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetRowDescription'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='GetColumnDescription'>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='GetRowExtentAt'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetColumnExtentAt'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='i'/>"
+    "  </method>"
+    "  <method name='GetRowHeader'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='out' type='(so)'/>"
+    "  </method>"
+    "  <method name='GetColumnHeader'>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='(so)'/>"
+    "  </method>"
+    "  <method name='GetSelectedRows'><arg direction='out' type='ai'/></method>"
+    "  <method name='GetSelectedColumns'><arg direction='out' type='ai'/></method>"
+    "  <method name='IsRowSelected'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='IsColumnSelected'>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='IsSelected'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='AddRowSelection'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='AddColumnSelection'>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='RemoveRowSelection'>"
+    "   <arg direction='in' name='row' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='RemoveColumnSelection'>"
+    "   <arg direction='in' name='column' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='GetRowColumnExtentsAtIndex'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "   <arg direction='out' name='row' type='i'/>"
+    "   <arg direction='out' name='col' type='i'/>"
+    "   <arg direction='out' name='row_extents' type='i'/>"
+    "   <arg direction='out' name='col_extents' type='i'/>"
+    "   <arg direction='out' name='is_selected' type='b'/>"
+    "  </method>"
+    " </interface>"
+    " <interface name='org.a11y.atspi.TableCell'>"
+    "  <property name='ColumnSpan' type='i' access='read'/>"
+    "  <property name='Position' type='(ii)' access='read'/>"
+    "  <property name='RowSpan' type='i' access='read'/>"
+    "  <property name='Table' type='(so)' access='read'/>"
+    "  <method name='GetRowColumnSpan'>"
+    "   <arg direction='out' type='b'/>"
+    "   <arg direction='out' name='row' type='i'/>"
+    "   <arg direction='out' name='col' type='i'/>"
+    "   <arg direction='out' name='row_extents' type='i'/>"
+    "   <arg direction='out' name='col_extents' type='i'/>"
+    "  </method>"
+    "  <method name='GetColumnHeaderCells'><arg direction='out' type='a(so)'/></method>"
+    "  <method name='GetRowHeaderCells'><arg direction='out' type='a(so)'/></method>"
+    " </interface>"
     "</node>";
 
 #define IFACE_ACCESSIBLE "org.a11y.atspi.Accessible"
 #define IFACE_APPLICATION "org.a11y.atspi.Application"
 #define IFACE_TEXT "org.a11y.atspi.Text"
+#define IFACE_TABLE "org.a11y.atspi.Table"
+#define IFACE_TABLE_CELL "org.a11y.atspi.TableCell"
 
 /* AtspiTextGranularity */
 enum { GRANULARITY_CHAR, GRANULARITY_WORD, GRANULARITY_SENTENCE, GRANULARITY_LINE,
@@ -218,8 +327,13 @@ struct node
     gint selection_start;
     gint selection_end;
     gint position;          /* from 1, 0 if not a list item */
-    gint set_size;
+    gint set_size;          /* items of a list, rows of a table */
     gboolean placeholder;   /* list item not described yet, see item_at */
+    /* Table: columns and their header texts. Cell or header: its place, from 0. */
+    gint column_count;
+    char **headers;
+    gint row;
+    gint column;
 };
 
 struct app
@@ -529,12 +643,16 @@ static const char *const *node_interfaces(struct node *node, guint *count)
 {
     static const char *const app_ifaces[] = { IFACE_ACCESSIBLE, IFACE_APPLICATION };
     static const char *const text_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TEXT };
+    static const char *const table_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TABLE };
+    static const char *const cell_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TABLE_CELL };
 
+    *count = 2;
     if (!node->parent)
-    {
-        *count = 2;
         return app_ifaces;
-    }
+    if (node->role == BRIDGE_ROLE_TABLE)
+        return table_ifaces;
+    if (node->role == BRIDGE_ROLE_TABLE_CELL)
+        return cell_ifaces;
     *count = node->chars ? 2 : 1;
     return text_ifaces;
 }
@@ -566,6 +684,112 @@ static void set_state(struct node *node, guint state, gboolean on)
 static gboolean is_item_list(struct node *node);
 static struct node *child_at(struct node *node, guint index);
 
+static GVariant *null_ref(void)
+{
+    return g_variant_new("(so)", "", ATSPI_NULL_PATH);
+}
+
+/*
+ * A table's children are its column headers, then its cells row by row,
+ * as in GTK 3; Orca finds a cell's coordinates from its index in parent
+ * (ax_table.py, _get_cell_index). -1 for a cell outside the table.
+ */
+static gint cell_index(struct node *table, gint row, gint column)
+{
+    gint index = (row + 1) * table->column_count + column;
+
+    if (row < 0 || column < 0 || row >= table->set_size || column >= table->column_count ||
+        index >= (gint)table->children->len)
+        return -1;
+    return index;
+}
+
+/*
+ * Only rows that had focus are known, and their state may be old, so
+ * the selection is told per row and the lists of selected rows stay
+ * empty rather than wrong.
+ */
+static gboolean row_selected(struct node *table, gint row)
+{
+    gint index = cell_index(table, row, 0);
+    struct node *cell = index >= 0 ? table->children->pdata[index] : NULL;
+
+    return cell && (cell->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED));
+}
+
+static GVariant *table_method(struct node *node, const char *method, GVariant *params)
+{
+    gint n = node->column_count, len = node->children->len, a = -1, b = -1, index;
+
+    /* Arguments are a row, a column or an index, or a row and a column. */
+    if (g_variant_is_of_type(params, G_VARIANT_TYPE("(ii)")))
+        g_variant_get(params, "(ii)", &a, &b);
+    else if (g_variant_is_of_type(params, G_VARIANT_TYPE("(i)")))
+        g_variant_get(params, "(i)", &a);
+
+    if (!g_strcmp0(method, "GetAccessibleAt"))
+    {
+        index = cell_index(node, a, b);
+        return g_variant_new("(@(so))", index >= 0 ? node_ref(child_at(node, index)) : null_ref());
+    }
+    if (!g_strcmp0(method, "GetIndexAt"))
+        return g_variant_new("(i)", cell_index(node, a, b));
+    if (!g_strcmp0(method, "GetRowAtIndex"))
+        return g_variant_new("(i)", n && a >= n && a < len ? a / n - 1 : -1);
+    if (!g_strcmp0(method, "GetColumnAtIndex"))
+        return g_variant_new("(i)", n && a >= n && a < len ? a % n : -1);
+    if (!g_strcmp0(method, "GetRowDescription"))
+        return g_variant_new("(s)", "");
+    if (!g_strcmp0(method, "GetColumnDescription"))
+        return g_variant_new("(s)", a >= 0 && a < n && node->headers ? node->headers[a] : "");
+    if (!g_strcmp0(method, "GetRowExtentAt") || !g_strcmp0(method, "GetColumnExtentAt"))
+        return g_variant_new("(i)", cell_index(node, a, b) >= 0 ? 1 : 0);
+    if (!g_strcmp0(method, "GetRowHeader"))
+        return g_variant_new("(@(so))", null_ref());
+    if (!g_strcmp0(method, "GetColumnHeader"))
+        return g_variant_new("(@(so))", a >= 0 && a < n && a < len ?
+                                        node_ref(child_at(node, a)) : null_ref());
+    if (!g_strcmp0(method, "GetSelectedRows") || !g_strcmp0(method, "GetSelectedColumns"))
+        return g_variant_new("(@ai)", g_variant_new_array(G_VARIANT_TYPE_INT32, NULL, 0));
+    if (!g_strcmp0(method, "IsRowSelected"))
+        return g_variant_new("(b)", row_selected(node, a));
+    if (!g_strcmp0(method, "IsSelected"))
+        return g_variant_new("(b)", cell_index(node, a, b) >= 0 && row_selected(node, a));
+    if (!g_strcmp0(method, "IsColumnSelected") || !g_strcmp0(method, "AddRowSelection") ||
+        !g_strcmp0(method, "AddColumnSelection") || !g_strcmp0(method, "RemoveRowSelection") ||
+        !g_strcmp0(method, "RemoveColumnSelection"))
+        return g_variant_new("(b)", FALSE);
+    if (!g_strcmp0(method, "GetRowColumnExtentsAtIndex"))
+    {
+        if (!n || a < n || a >= len)
+            return g_variant_new("(biiiib)", FALSE, -1, -1, 0, 0, FALSE);
+        return g_variant_new("(biiiib)", TRUE, a / n - 1, a % n, 1, 1,
+                             row_selected(node, a / n - 1));
+    }
+    return NULL;
+}
+
+static GVariant *table_cell_method(struct node *node, const char *method)
+{
+    struct node *table = node->parent;
+
+    if (!g_strcmp0(method, "GetRowColumnSpan"))
+        return g_variant_new("(biiii)", TRUE, node->row, node->column, 1, 1);
+    if (!g_strcmp0(method, "GetColumnHeaderCells"))
+    {
+        GVariantBuilder b;
+
+        g_variant_builder_init(&b, G_VARIANT_TYPE("a(so)"));
+        if (table && table->role == BRIDGE_ROLE_TABLE && node->column < table->column_count &&
+            node->column < (gint)table->children->len)
+            g_variant_builder_add_value(&b, node_ref(child_at(table, node->column)));
+        return g_variant_new("(a(so))", &b);
+    }
+    if (!g_strcmp0(method, "GetRowHeaderCells"))
+        return g_variant_new("(@a(so))", g_variant_new_array(G_VARIANT_TYPE("(so)"), NULL, 0));
+    return NULL;
+}
+
 static void method_call(GDBusConnection *conn, const char *sender,
                         const char *path, const char *iface,
                         const char *method, GVariant *params,
@@ -577,6 +801,10 @@ static void method_call(GDBusConnection *conn, const char *sender,
 
     if (!g_strcmp0(iface, IFACE_TEXT))
         ret = text_method(node, method, params);
+    else if (!g_strcmp0(iface, IFACE_TABLE))
+        ret = table_method(node, method, params);
+    else if (!g_strcmp0(iface, IFACE_TABLE_CELL))
+        ret = table_cell_method(node, method);
     else if (!g_strcmp0(method, "GetChildAtIndex"))
     {
         gint index;
@@ -692,6 +920,20 @@ static GVariant *get_property(GDBusConnection *conn, const char *sender,
         return g_variant_new_int32(node->count);
     if (!g_strcmp0(prop, "CaretOffset"))
         return g_variant_new_int32(node->caret);
+    if (!g_strcmp0(prop, "NRows"))
+        return g_variant_new_int32(node->set_size);
+    if (!g_strcmp0(prop, "NColumns"))
+        return g_variant_new_int32(node->column_count);
+    if (!g_strcmp0(prop, "Caption") || !g_strcmp0(prop, "Summary"))
+        return null_ref();
+    if (!g_strcmp0(prop, "NSelectedRows") || !g_strcmp0(prop, "NSelectedColumns"))
+        return g_variant_new_int32(0);
+    if (!g_strcmp0(prop, "ColumnSpan") || !g_strcmp0(prop, "RowSpan"))
+        return g_variant_new_int32(1);
+    if (!g_strcmp0(prop, "Position"))
+        return g_variant_new("(ii)", node->row, node->column);
+    if (!g_strcmp0(prop, "Table"))
+        return parent_ref(node);
     g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_PROPERTY,
                 "%s not supported", prop);
     return NULL;
@@ -817,6 +1059,7 @@ static void node_free(struct node *node)
     g_free(node->value);
     g_free(node->window_class);
     g_free(node->chars);
+    g_strfreev(node->headers);
     g_free(node);
 }
 
@@ -850,20 +1093,19 @@ static char *object_id(const struct bridge_object *obj)
  * says "list with n available items" when fewer children than setsize
  * are sensitive (speech_generator.py, _generate_number_of_children).
  * Only items that had focus are known; the other slots are NULL until
- * asked for, then filled by placeholders.
+ * asked for, then filled by placeholders. A table has a slot for each
+ * column header and each cell, see cell_index.
  */
 static gboolean is_item_list(struct node *node)
 {
-    return node->role == BRIDGE_ROLE_LIST_BOX;
+    return node->role == BRIDGE_ROLE_LIST_BOX || node->role == BRIDGE_ROLE_TABLE;
 }
 
-static void sync_items(struct node *list)
+/* Keeps count slots; the known children beyond them leave, announced. */
+static void resize_items(struct node *list, guint count)
 {
-    guint count = MAX(list->set_size, 0);
     GPtrArray *children = list->children;
 
-    if (!is_item_list(list))
-        return;
     while (children->len > count)
     {
         struct node *child = children->pdata[children->len - 1];
@@ -879,31 +1121,100 @@ static void sync_items(struct node *list)
     g_ptr_array_set_size(children, count);
 }
 
-/* Item index of an item list as a node; a placeholder if not known yet. */
+static void sync_items(struct node *list)
+{
+    guint count = MAX(list->set_size, 0);
+
+    if (!is_item_list(list))
+        return;
+    if (list->role == BRIDGE_ROLE_TABLE)
+        count = (count + 1) * list->column_count;
+    resize_items(list, count);
+}
+
+/*
+ * Copies the columns of obj; for a table, its header texts. Slots laid
+ * out for another role or column count are dropped first.
+ */
+static void set_columns(struct node *node, const struct bridge_object *obj)
+{
+    gint i;
+
+    if (is_item_list(node) &&
+        (node->role != obj->role || node->column_count != obj->column_count))
+        resize_items(node, 0);
+    node->column_count = obj->column_count;
+    g_strfreev(node->headers);
+    node->headers = NULL;
+    if (obj->role != BRIDGE_ROLE_TABLE)
+        return;
+    node->headers = g_new0(char *, obj->column_count + 1);
+    for (i = 0; i < obj->column_count; i++)
+    {
+        struct node *header = i < (gint)node->children->len ? node->children->pdata[i] : NULL;
+
+        node->headers[i] = g_strdup(obj->columns[i] ? obj->columns[i] : "");
+        if (header)
+        {
+            g_free(header->name);
+            header->name = g_strdup(node->headers[i]);
+        }
+    }
+}
+
+/*
+ * Item index of an item list as a node; a placeholder if not known yet.
+ * Ids: "w<hwnd>_<item + 1>" as for an item from the Win32 side, which in
+ * a table is the cell of the first column; "w<hwnd>_<row + 1>_<column>"
+ * for the other cells, "w<hwnd>_h<column>" for column headers.
+ */
 static struct node *item_at(struct node *list, guint index)
 {
     struct node *item = list->children->pdata[index];
+    int prefix = (int)(g_strrstr(list->id, "_") + 1 - list->id);
+    guint n = list->column_count;
     char *id;
 
     if (item)
         return item;
-    id = g_strdup_printf("%.*s%u", (int)(g_strrstr(list->id, "_") + 1 - list->id),
-                         list->id, index + 1);
+    if (list->role != BRIDGE_ROLE_TABLE)
+        id = g_strdup_printf("%.*s%u", prefix, list->id, index + 1);
+    else if (index < n)
+        id = g_strdup_printf("%.*sh%u", prefix, list->id, index);
+    else if (index % n)
+        id = g_strdup_printf("%.*s%u_%u", prefix, list->id, index / n, index % n);
+    else
+        id = g_strdup_printf("%.*s%u", prefix, list->id, index / n);
     item = node_new(list->app, id, NULL);
     g_free(id);
     item->parent = list;
     list->children->pdata[index] = item;
-    item->role = BRIDGE_ROLE_LIST_ITEM;
+    item->window_class = g_strdup(list->window_class);
+    item->placeholder = TRUE;
     item->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
                    BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
                    BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
-                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
-                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
-                   BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE);
-    item->window_class = g_strdup(list->window_class);
+                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
+    if (list->role == BRIDGE_ROLE_TABLE && index < n)
+    {
+        item->role = BRIDGE_ROLE_COLUMN_HEADER;
+        item->name = g_strdup(list->headers ? list->headers[index] : "");
+        item->row = -1;
+        item->column = index;
+        return item;
+    }
+    item->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
+                    BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE);
+    item->role = BRIDGE_ROLE_LIST_ITEM;
     item->position = index + 1;
+    if (list->role == BRIDGE_ROLE_TABLE)
+    {
+        item->role = BRIDGE_ROLE_TABLE_CELL;
+        item->row = index / n - 1;
+        item->column = index % n;
+        item->position = item->row + 1;
+    }
     item->set_size = list->set_size;
-    item->placeholder = TRUE;
     return item;
 }
 
@@ -975,12 +1286,41 @@ static void set_text(struct node *node, const struct bridge_object *obj, gboolea
         emit(node, EVENT_OBJECT, "TextSelectionChanged", "", 0, 0, g_variant_new_int32(0));
 }
 
+/*
+ * The Win32 side describes only the first cell of a table row; the
+ * other cells of the row take their texts from it and share its states,
+ * so that Orca can read the whole row (ax_utilities_table.py,
+ * get_showing_cells_in_same_row).
+ */
+static void set_row(struct node *cell, const struct bridge_object *obj)
+{
+    struct node *table = cell->parent;
+    gint i, index;
+
+    if (cell->role != BRIDGE_ROLE_TABLE_CELL || !table || table->role != BRIDGE_ROLE_TABLE)
+        return;
+    for (i = 1; i < obj->column_count; i++)
+    {
+        struct node *other;
+
+        if ((index = cell_index(table, cell->row, i)) < 0)
+            break;
+        other = item_at(table, index);
+        g_free(other->name);
+        other->name = g_strdup(obj->columns[i]);
+        other->states = cell->states & ~OWN_STATES;
+        other->position = cell->position;
+        other->set_size = cell->set_size;
+    }
+}
+
 /* Copies obj into an existing node, announcing a changed name, state or text. */
 static void update_node(struct node *node, const struct bridge_object *obj)
 {
     guint64 changed = (node->states ^ obj->states) & ~OWN_STATES;
     guint state;
 
+    set_columns(node, obj);
     node->role = obj->role;
     node->position = obj->position;
     node->set_size = obj->set_size;
@@ -1022,6 +1362,7 @@ static void update_node(struct node *node, const struct bridge_object *obj)
     }
     if (obj->text)
         set_text(node, obj, TRUE);
+    set_row(node, obj);
 }
 
 /* Finds or creates the node for obj below parent and updates it. */
@@ -1039,7 +1380,14 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
             parent->set_size = obj->set_size;
             sync_items(parent);
         }
-        if (obj->child <= parent->children->len)
+        if (parent->role == BRIDGE_ROLE_TABLE)
+        {
+            gint index = cell_index(parent, obj->child - 1, 0);
+
+            if (index >= 0)
+                item_at(parent, index);
+        }
+        else if (obj->child <= parent->children->len)
             item_at(parent, obj->child - 1);
     }
     node = g_hash_table_lookup(app->nodes, id);
@@ -1051,6 +1399,7 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         if (!node)
             node = node_new(app, id, parent);
         node->placeholder = FALSE;
+        set_columns(node, obj);
         node->role = obj->role;
         node->states = obj->states & ~OWN_STATES;
         g_free(node->name);
@@ -1062,6 +1411,7 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         node->set_size = obj->set_size;
         if (obj->text)
             set_text(node, obj, FALSE);
+        set_row(node, obj);
     }
     sync_items(node);
     g_free(id);
@@ -1269,6 +1619,7 @@ static void free_object(struct bridge_object *obj)
     g_free((char *)obj->value);
     g_free((char *)obj->window_class);
     g_free((char *)obj->text);
+    g_strfreev((char **)obj->columns);
 }
 
 static void free_update(gpointer data)
@@ -1297,6 +1648,18 @@ static void copy_object(struct bridge_object *dst, const struct bridge_object *s
     dst->value = g_strdup(src->value);
     dst->window_class = g_strdup(src->window_class);
     dst->text = g_strdup(src->text);
+    dst->columns = NULL;
+    if (src->column_count > 0)
+    {
+        char **columns = g_new0(char *, src->column_count + 1);
+        gint i;
+
+        for (i = 0; i < src->column_count; i++)
+            columns[i] = g_strdup(src->columns[i] ? src->columns[i] : "");
+        dst->columns = (const char *const *)columns;
+    }
+    else
+        dst->column_count = 0;
 }
 
 static void post(GSourceFunc func, gpointer data, GDestroyNotify free_func)

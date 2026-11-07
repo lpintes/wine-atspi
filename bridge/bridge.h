@@ -110,11 +110,20 @@ struct bridge_object
      */
     int position;
     int set_size;
+    /*
+     * Columns of a table, in display order: for a table (role TABLE) the
+     * column header texts, for a table cell the texts of all cells of its
+     * row; the cell itself is the one in the first column. column_count
+     * is 0 for other objects.
+     */
+    int column_count;
+    const char *const *columns;
 };
 
 /*
  * Focus moved to object, which lives in top-level window frame. An item
- * of a list lives in container, the list window; container.hwnd is 0 if
+ * of a list or a cell of a table lives in container, the list window
+ * (role LIST_BOX or TABLE); container.hwnd is 0 if
  * object is a direct child of frame.
  */
 struct bridge_focus

@@ -186,6 +186,12 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
 - A focused list item gets the list window as its AT-SPI parent (role
   list box, label from `find_label`, `bridge_focus.container`), so Orca
   says the list's label when focus enters it.
+- Wine's `LVM_SETVIEW` changes the list view mode without touching
+  the window style, so report view is detected with `LVM_GETVIEW`
+  (`LV_VIEW_DETAILS`). Header texts come from `LVM_GETCOLUMNW`, the
+  display order from `LVM_GETCOLUMNORDERARRAY`, which fails if its
+  count is smaller than the number of columns
+  (`HEADER_GetOrderArray`). Both need memory in the target.
 - After an arrow key in the Open dialog's file list the dialog thread is
   busy for 0.3 to over 0.5 s (WSL, folder on `/mnt/c`), so list view
   queries can time out; the key check retries a busy list.
@@ -233,6 +239,16 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   silent. The bridge then emits `object:announcement` (polite) with the
   item's name, unless the last key was Space (`update_node`); Orca
   presents an announcement's text (`_on_announcement`).
+- In a GUI table Orca reads the full row when focus moves to another
+  row (`should_read_full_row`, setting on by default): it asks
+  `Table.GetAccessibleAt` for every column of the focused cell's row.
+  A cell's coordinates come from `TableCell.Position`, else from its
+  index in parent with `Table.GetRowAtIndex` / `GetColumnAtIndex`. The
+  table needs role table, tree table or tree plus the `Table`
+  interface. The bridge lays a table out like GTK 3: column headers
+  first, then cells row by row (`cell_index` in `atspi.c`). Confirmed
+  with Orca on a report-view list view (2026-11-07), including
+  Ctrl+arrows and Ctrl+Space.
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it

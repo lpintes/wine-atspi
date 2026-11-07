@@ -16,6 +16,8 @@
 #include "bridge.h"
 
 #define NAME_MAX_UTF8 1024
+/* Columns of a list view in report view beyond this are left out. */
+#define MAX_COLUMNS 16
 
 static BOOL debug;
 
@@ -50,6 +52,11 @@ struct focus_strings
     char value[NAME_MAX_UTF8];
     char frame_class[256 * 3];
     char object_class[256 * 3];
+    /* Column texts of a table: cells of the focused row, or the headers. */
+    char cells[MAX_COLUMNS][NAME_MAX_UTF8];
+    const char *cell_ptrs[MAX_COLUMNS];
+    char headers[MAX_COLUMNS][NAME_MAX_UTF8];
+    const char *header_ptrs[MAX_COLUMNS];
     char *text;     /* heap, see free_strings */
 };
 
@@ -478,61 +485,164 @@ struct lvitem32
     int cchTextMax;
 };
 
-/* Room for the item structure in front of the text in the target. */
+/* LVCOLUMNW as a 32-bit (WoW64) process sees it, up to cchTextMax. */
+struct lvcolumn32
+{
+    UINT mask;
+    int fmt;
+    int cx;
+    ULONG pszText;
+    int cchTextMax;
+};
+
+/* Room for the structure in front of the text in the target. */
 #define REMOTE_HEADER 128
+/* Text of one list view cell or column header, in WCHARs. */
+#define CELL_TEXT_MAX (NAME_MAX_UTF8 / 3)
 
 /*
- * Wine does not marshal LVM_GETITEMTEXTW across processes. Like NVDA,
- * put the LVITEMW and its text buffer into the target's memory.
+ * Wine does not marshal list view messages with pointers across
+ * processes. Like NVDA, put the structure and its text buffer into a
+ * block of the target's memory: the structure at the start, the text
+ * at REMOTE_HEADER.
  */
-static BOOL get_listview_text(HWND hwnd, int item, WCHAR *buf, int len)
+struct remote
 {
-    BYTE header[REMOTE_HEADER];
     HANDLE process;
-    BOOL wow64 = FALSE, ok = FALSE;
-    DWORD_PTR copied = 0;
+    char *base;
+    BOOL wow64;
+};
+
+static BOOL remote_open(HWND hwnd, struct remote *r)
+{
     DWORD pid = 0;
+
+    GetWindowThreadProcessId(hwnd, &pid);
+    r->wow64 = FALSE;
+    r->process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE |
+                             PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!r->process)
+        return FALSE;
+    IsWow64Process(r->process, &r->wow64);
+    r->base = VirtualAllocEx(r->process, NULL, REMOTE_HEADER + CELL_TEXT_MAX * sizeof(WCHAR),
+                             MEM_COMMIT, PAGE_READWRITE);
+    if (r->base)
+        return TRUE;
+    CloseHandle(r->process);
+    return FALSE;
+}
+
+static void remote_close(struct remote *r)
+{
+    VirtualFreeEx(r->process, r->base, 0, MEM_RELEASE);
+    CloseHandle(r->process);
+}
+
+/*
+ * Sends msg with a pointer to header, copied to the target, and reads
+ * the text the target wrote at REMOTE_HEADER into buf (CELL_TEXT_MAX).
+ */
+static BOOL remote_text(HWND hwnd, struct remote *r, UINT msg, WPARAM wparam,
+                        const BYTE *header, WCHAR *buf)
+{
+    static const WCHAR empty = 0;
+    DWORD_PTR ret;
     SIZE_T done;
-    char *remote;
 
     buf[0] = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE |
-                          PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!process)
+    /* Clear the text, a control may leave an empty one unwritten. */
+    if (!WriteProcessMemory(r->process, r->base, header, REMOTE_HEADER, &done) ||
+        !WriteProcessMemory(r->process, r->base + REMOTE_HEADER, &empty, sizeof(empty), &done) ||
+        !SendMessageTimeoutW(hwnd, msg, wparam, (LPARAM)r->base, SMTO_ABORTIFHUNG, 500, &ret) ||
+        !ReadProcessMemory(r->process, r->base + REMOTE_HEADER, buf,
+                           CELL_TEXT_MAX * sizeof(WCHAR), &done))
         return FALSE;
-    IsWow64Process(process, &wow64);
-    remote = VirtualAllocEx(process, NULL, REMOTE_HEADER + len * sizeof(WCHAR),
-                            MEM_COMMIT, PAGE_READWRITE);
-    if (remote)
+    buf[CELL_TEXT_MAX - 1] = 0;
+    return TRUE;
+}
+
+/* Text of item's subitem (0 for the item itself) of a list view. */
+static BOOL get_listview_text(HWND hwnd, struct remote *r, int item, int subitem, WCHAR *buf)
+{
+    BYTE header[REMOTE_HEADER];
+
+    memset(header, 0, sizeof(header));
+    if (r->wow64)
     {
-        memset(header, 0, sizeof(header));
-        if (wow64)
-        {
-            struct lvitem32 *lv = (struct lvitem32 *)header;
+        struct lvitem32 *lv = (struct lvitem32 *)header;
 
-            lv->pszText = (ULONG)(ULONG_PTR)(remote + REMOTE_HEADER);
-            lv->cchTextMax = len;
-        }
-        else
-        {
-            LVITEMW *lv = (LVITEMW *)header;
-
-            lv->pszText = (WCHAR *)(remote + REMOTE_HEADER);
-            lv->cchTextMax = len;
-        }
-        if (WriteProcessMemory(process, remote, header, sizeof(header), &done) &&
-            SendMessageTimeoutW(hwnd, LVM_GETITEMTEXTW, item, (LPARAM)remote,
-                                SMTO_ABORTIFHUNG, 500, &copied) &&
-            ReadProcessMemory(process, remote + REMOTE_HEADER, buf, len * sizeof(WCHAR), &done))
-        {
-            buf[len - 1] = 0;
-            ok = TRUE;
-        }
-        VirtualFreeEx(process, remote, 0, MEM_RELEASE);
+        lv->iSubItem = subitem;
+        lv->pszText = (ULONG)(ULONG_PTR)(r->base + REMOTE_HEADER);
+        lv->cchTextMax = CELL_TEXT_MAX;
     }
-    CloseHandle(process);
-    return ok;
+    else
+    {
+        LVITEMW *lv = (LVITEMW *)header;
+
+        lv->iSubItem = subitem;
+        lv->pszText = (WCHAR *)(r->base + REMOTE_HEADER);
+        lv->cchTextMax = CELL_TEXT_MAX;
+    }
+    return remote_text(hwnd, r, LVM_GETITEMTEXTW, item, header, buf);
+}
+
+/* Header text of column (a subitem index) of a list view. */
+static BOOL get_listview_header(HWND hwnd, struct remote *r, int column, WCHAR *buf)
+{
+    BYTE header[REMOTE_HEADER];
+
+    memset(header, 0, sizeof(header));
+    if (r->wow64)
+    {
+        struct lvcolumn32 *lv = (struct lvcolumn32 *)header;
+
+        lv->mask = LVCF_TEXT;
+        lv->pszText = (ULONG)(ULONG_PTR)(r->base + REMOTE_HEADER);
+        lv->cchTextMax = CELL_TEXT_MAX;
+    }
+    else
+    {
+        LVCOLUMNW *lv = (LVCOLUMNW *)header;
+
+        lv->mask = LVCF_TEXT;
+        lv->pszText = (WCHAR *)(r->base + REMOTE_HEADER);
+        lv->cchTextMax = CELL_TEXT_MAX;
+    }
+    return remote_text(hwnd, r, LVM_GETCOLUMNW, column, header, buf);
+}
+
+/*
+ * Columns of a list view in report view: their subitem indices in display
+ * order (the user may drag columns). 0 in other views. Wine changes the
+ * view with LVM_SETVIEW without touching the style, so ask for the view.
+ */
+static int listview_columns(HWND hwnd, struct remote *r, int *order)
+{
+    DWORD_PTR view = 0, header = 0, count = 0, ok = 0;
+    SIZE_T done;
+    int i;
+
+    if (!SendMessageTimeoutW(hwnd, LVM_GETVIEW, 0, 0, SMTO_ABORTIFHUNG, 500, &view) ||
+        view != LV_VIEW_DETAILS ||
+        !SendMessageTimeoutW(hwnd, LVM_GETHEADER, 0, 0, SMTO_ABORTIFHUNG, 500, &header) ||
+        !header ||
+        !SendMessageTimeoutW((HWND)header, HDM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) ||
+        (LONG)count <= 0)
+        return 0;
+    for (i = 0; i < MAX_COLUMNS; i++)
+        order[i] = i;
+    /* The header wants room for all columns (header.c, HEADER_GetOrderArray). */
+    if (count > MAX_COLUMNS)
+        return MAX_COLUMNS;
+    if (SendMessageTimeoutW(hwnd, LVM_GETCOLUMNORDERARRAY, count, (LPARAM)r->base,
+                            SMTO_ABORTIFHUNG, 500, &ok) && ok &&
+        ReadProcessMemory(r->process, r->base, order, count * sizeof(int), &done))
+    {
+        for (i = 0; i < (int)count; i++)
+            if (order[i] < 0 || order[i] >= (int)count)
+                order[i] = i;
+    }
+    return (int)count;
 }
 
 /*
@@ -555,22 +665,45 @@ static int listview_focus(HWND hwnd)
 /*
  * Wine's oleacc has only a stub for SysListView32, and the list view
  * emits no focus or selection events, so describe the item through list
- * view messages. The MSAA child id is item + 1, as on Windows. FALSE if
- * the text could not be read.
+ * view messages. The MSAA child id is item + 1, as on Windows. In report
+ * view the item is the cell of the first column of a table row, and the
+ * texts of the whole row go along, as Orca reads the full row of a GUI
+ * table (generator.py, _cells_to_present). FALSE if the text could not
+ * be read.
  */
 static BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *obj,
                                    struct focus_strings *str)
 {
-    WCHAR text[NAME_MAX_UTF8 / 3];
+    WCHAR text[CELL_TEXT_MAX];
     DWORD_PTR state = 0, count = 0;
+    int order[MAX_COLUMNS], columns, i;
+    struct remote r;
+    BOOL ok;
 
-    if (!get_listview_text(hwnd, item, text, ARRAYSIZE(text)))
+    if (!remote_open(hwnd, &r))
+        return FALSE;
+    columns = listview_columns(hwnd, &r, order);
+    ok = get_listview_text(hwnd, &r, item, columns ? order[0] : 0, text);
+    for (i = 0; ok && i < columns; i++)
+    {
+        if (i && !get_listview_text(hwnd, &r, item, order[i], text))
+            text[0] = 0;
+        to_utf8(text, str->cells[i], sizeof(str->cells[i]));
+        str->cell_ptrs[i] = str->cells[i];
+    }
+    remote_close(&r);
+    if (!ok)
         return FALSE;
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->child = item + 1;
-    obj->role = BRIDGE_ROLE_LIST_ITEM;
+    obj->role = columns ? BRIDGE_ROLE_TABLE_CELL : BRIDGE_ROLE_LIST_ITEM;
     obj->value = NULL;
-    to_utf8(text, str->object, sizeof(str->object));
+    obj->column_count = columns;
+    obj->columns = columns ? str->cell_ptrs : NULL;
+    if (columns)
+        lstrcpyA(str->object, str->cells[0]);
+    else
+        to_utf8(text, str->object, sizeof(str->object));
     obj->name = str->object;
     obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
@@ -601,12 +734,17 @@ static BOOL is_list_box(const WCHAR *cls)
  * speaks the role of a focused "list" and says nothing for an unnamed
  * one, and skips a "list" ancestor by default; for a "list box" it says
  * "n items" from setsize, or the role if the list is empty
- * (speech_generator.py).
+ * (speech_generator.py). A list view in report view is a table with its
+ * column headers instead; set_size then counts the rows.
  */
-static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *obj)
+static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *obj,
+                              struct focus_strings *str)
 {
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
     DWORD_PTR count = 0;
+    WCHAR text[CELL_TEXT_MAX];
+    int order[MAX_COLUMNS], i;
+    struct remote r;
 
     obj->role = BRIDGE_ROLE_LIST_BOX;
     if (listview ? !(style & LVS_SINGLESEL) : (style & (LBS_MULTIPLESEL | LBS_EXTENDEDSEL)) != 0)
@@ -614,6 +752,22 @@ static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *ob
     if (SendMessageTimeoutW(hwnd, listview ? LVM_GETITEMCOUNT : LB_GETCOUNT, 0, 0,
                             SMTO_ABORTIFHUNG, 500, &count) && (LONG)count >= 0)
         obj->set_size = (int)count;
+    if (!listview || !remote_open(hwnd, &r))
+        return;
+    obj->column_count = listview_columns(hwnd, &r, order);
+    for (i = 0; i < obj->column_count; i++)
+    {
+        if (!get_listview_header(hwnd, &r, order[i], text))
+            text[0] = 0;
+        to_utf8(text, str->headers[i], sizeof(str->headers[i]));
+        str->header_ptrs[i] = str->headers[i];
+    }
+    remote_close(&r);
+    if (obj->column_count)
+    {
+        obj->role = BRIDGE_ROLE_TABLE;
+        obj->columns = str->header_ptrs;
+    }
 }
 
 /*
@@ -638,7 +792,7 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
-    describe_list_box(hwnd, !is_list_box(cls), obj);
+    describe_list_box(hwnd, !is_list_box(cls), obj, str);
 }
 
 /*
@@ -714,7 +868,8 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     obj->window_class = str->object_class;
     obj->text = NULL;
     str->text = NULL;
-    obj->position = obj->set_size = 0;
+    obj->position = obj->set_size = obj->column_count = 0;
+    obj->columns = NULL;
     listview = id_object == OBJID_CLIENT && !lstrcmpiW(cls, L"SysListView32");
     if (listview)
     {
@@ -785,7 +940,7 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     if (!str->object[0] && !obj->child && needs_label(obj->role))
         find_label(hwnd, str->object, sizeof(str->object));
     if ((listview || listbox) && !obj->child)
-        describe_list_box(hwnd, listview, obj);
+        describe_list_box(hwnd, listview, obj, str);
 
     SysFreeString(name);
     VariantClear(&role);

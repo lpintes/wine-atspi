@@ -9,14 +9,17 @@
  *   "Fruits:"  ListBox, single selection: Apple, Banana, Cherry
  *   "Empty:"   ListBox without items
  *   "Colors:"  ListBox, extended selection: Red, Green, Blue
+ *   "Files:"   SysListView32 in report view, columns Name, Size, Type,
+ *              rows readme.txt / notes.md / src
  *   "Close"    Button
  */
 
 #include <windows.h>
+#include <commctrl.h>
 
 #define CLASS_NAME L"WineAtspiControls"
 
-enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_CLOSE };
+enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_CLOSE };
 
 static HWND add_control(HWND parent, const WCHAR *cls, const WCHAR *text, DWORD style,
                         int x, int y, int w, int h, int id)
@@ -38,6 +41,47 @@ static void add_list(HWND parent, const WCHAR *label, DWORD style, int y, int id
         SendMessageW(list, LB_ADDSTRING, 0, (LPARAM)*items);
 }
 
+static void add_files(HWND parent, int y)
+{
+    static const WCHAR *const columns[] = { L"Name", L"Size", L"Type" };
+    static const WCHAR *const rows[][3] = {
+        { L"readme.txt", L"2 KB", L"Text" },
+        { L"notes.md", L"5 KB", L"Markdown" },
+        { L"src", L"", L"Folder" },
+    };
+    LVCOLUMNW col = { 0 };
+    LVITEMW item = { 0 };
+    HWND list;
+    int i, j;
+
+    add_control(parent, L"Static", L"F&iles:", SS_LEFT, 10, y, 100, 20, 0);
+    list = add_control(parent, WC_LISTVIEWW, NULL,
+                       WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SHOWSELALWAYS,
+                       120, y, 300, 100, ID_FILES);
+    col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+    col.cx = 90;
+    for (i = 0; i < ARRAYSIZE(columns); i++)
+    {
+        col.pszText = (WCHAR *)columns[i];
+        col.iSubItem = i;
+        SendMessageW(list, LVM_INSERTCOLUMNW, i, (LPARAM)&col);
+    }
+    item.mask = LVIF_TEXT;
+    for (i = 0; i < ARRAYSIZE(rows); i++)
+    {
+        item.iItem = i;
+        item.iSubItem = 0;
+        item.pszText = (WCHAR *)rows[i][0];
+        SendMessageW(list, LVM_INSERTITEMW, 0, (LPARAM)&item);
+        for (j = 1; j < ARRAYSIZE(columns); j++)
+        {
+            item.iSubItem = j;
+            item.pszText = (WCHAR *)rows[i][j];
+            SendMessageW(list, LVM_SETITEMTEXTW, i, (LPARAM)&item);
+        }
+    }
+}
+
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static const WCHAR *const fruits[] = { L"Apple", L"Banana", L"Cherry", NULL };
@@ -49,8 +93,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         add_list(hwnd, L"&Fruits:", 0, 10, ID_FRUITS, fruits);
         add_list(hwnd, L"&Empty:", 0, 90, ID_EMPTY, NULL);
         add_list(hwnd, L"&Colors:", LBS_EXTENDEDSEL, 170, ID_COLORS, colors);
+        add_files(hwnd, 250);
         add_control(hwnd, L"Button", L"Close", WS_TABSTOP | BS_PUSHBUTTON,
-                    120, 250, 100, 25, ID_CLOSE);
+                    120, 360, 100, 25, ID_CLOSE);
         return 0;
     case WM_SETFOCUS:
         SetFocus(GetDlgItem(hwnd, ID_FRUITS));
@@ -72,6 +117,9 @@ int main(void)
     HWND hwnd;
     MSG msg;
 
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES };
+
+    InitCommonControlsEx(&icc);
     wc.lpfnWndProc = window_proc;
     wc.hInstance = GetModuleHandleW(NULL);
     wc.hCursor = LoadCursorW(NULL, (const WCHAR *)IDC_ARROW);
@@ -79,7 +127,7 @@ int main(void)
     wc.lpszClassName = CLASS_NAME;
     RegisterClassW(&wc);
     hwnd = CreateWindowExW(0, CLASS_NAME, L"Controls", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 360, 330, NULL, NULL,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 440, NULL, NULL,
                            wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     while (GetMessageW(&msg, NULL, 0, 0) > 0)
