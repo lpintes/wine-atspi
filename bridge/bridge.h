@@ -63,6 +63,7 @@ enum bridge_state
 {
     BRIDGE_STATE_ACTIVE = 1,
     BRIDGE_STATE_CHECKED = 4,
+    BRIDGE_STATE_COLLAPSED = 5,
     BRIDGE_STATE_EDITABLE = 7,
     BRIDGE_STATE_ENABLED = 8,
     BRIDGE_STATE_EXPANDABLE = 9,
@@ -107,9 +108,12 @@ struct bridge_object
     /*
      * Position among the items of a list, from 1; 0 if not an item.
      * set_size counts the items, also for the list itself; 0 if unknown.
+     * A tree item counts among its siblings and has its level, from 1;
+     * level is 0 for other objects.
      */
     int position;
     int set_size;
+    int level;
     /*
      * Columns of a table, in display order: for a table (role TABLE) the
      * column header texts, for a table cell the texts of all cells of its
@@ -123,7 +127,7 @@ struct bridge_object
 /*
  * Focus moved to object, which lives in top-level window frame. An item
  * of a list or a cell of a table lives in container, the list window
- * (role LIST_BOX or TABLE); container.hwnd is 0 if
+ * (role LIST_BOX, TABLE or TREE); container.hwnd is 0 if
  * object is a direct child of frame.
  */
 struct bridge_focus

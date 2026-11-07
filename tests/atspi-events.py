@@ -41,8 +41,15 @@ def describe(obj):
             text += " %s/%s" % (attrs["posinset"], attrs.get("setsize"))
         elif "setsize" in attrs:
             text += " %s items" % attrs["setsize"]
-        if obj.get_state_set().contains(Atspi.StateType.SELECTED):
+        if "level" in attrs:
+            text += " level=%s" % attrs["level"]
+        states = obj.get_state_set()
+        if states.contains(Atspi.StateType.SELECTED):
             text += " selected"
+        if states.contains(Atspi.StateType.EXPANDED):
+            text += " expanded"
+        elif states.contains(Atspi.StateType.COLLAPSED):
+            text += " collapsed"
         text += describe_text(obj)
         text += describe_table(obj)
         return text

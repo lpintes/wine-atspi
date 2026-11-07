@@ -11,6 +11,8 @@
  *   "Colors:"  ListBox, extended selection: Red, Green, Blue
  *   "Files:"   SysListView32 in report view, columns Name, Size, Type,
  *              rows readme.txt / notes.md / src
+ *   "Places:"  SysTreeView32, collapsed: Home (Documents, Music),
+ *              Work (Reports), Trash
  *   "Close"    Button
  */
 
@@ -19,7 +21,7 @@
 
 #define CLASS_NAME L"WineAtspiControls"
 
-enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_CLOSE };
+enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_CLOSE };
 
 static HWND add_control(HWND parent, const WCHAR *cls, const WCHAR *text, DWORD style,
                         int x, int y, int w, int h, int id)
@@ -82,6 +84,35 @@ static void add_files(HWND parent, int y)
     }
 }
 
+static HTREEITEM add_place(HWND tree, HTREEITEM parent, const WCHAR *text)
+{
+    TVINSERTSTRUCTW ins = { 0 };
+
+    ins.hParent = parent;
+    ins.hInsertAfter = TVI_LAST;
+    ins.item.mask = TVIF_TEXT;
+    ins.item.pszText = (WCHAR *)text;
+    return (HTREEITEM)SendMessageW(tree, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+}
+
+static void add_places(HWND parent, int y)
+{
+    HWND tree;
+    HTREEITEM item;
+
+    add_control(parent, L"Static", L"&Places:", SS_LEFT, 10, y, 100, 20, 0);
+    tree = add_control(parent, WC_TREEVIEWW, NULL,
+                       WS_TABSTOP | WS_BORDER | TVS_HASBUTTONS | TVS_HASLINES |
+                       TVS_LINESATROOT | TVS_SHOWSELALWAYS,
+                       120, y, 300, 100, ID_PLACES);
+    item = add_place(tree, TVI_ROOT, L"Home");
+    add_place(tree, item, L"Documents");
+    add_place(tree, item, L"Music");
+    item = add_place(tree, TVI_ROOT, L"Work");
+    add_place(tree, item, L"Reports");
+    add_place(tree, TVI_ROOT, L"Trash");
+}
+
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static const WCHAR *const fruits[] = { L"Apple", L"Banana", L"Cherry", NULL };
@@ -94,8 +125,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         add_list(hwnd, L"&Empty:", 0, 90, ID_EMPTY, NULL);
         add_list(hwnd, L"&Colors:", LBS_EXTENDEDSEL, 170, ID_COLORS, colors);
         add_files(hwnd, 250);
+        add_places(hwnd, 360);
         add_control(hwnd, L"Button", L"Close", WS_TABSTOP | BS_PUSHBUTTON,
-                    120, 360, 100, 25, ID_CLOSE);
+                    120, 470, 100, 25, ID_CLOSE);
         return 0;
     case WM_SETFOCUS:
         SetFocus(GetDlgItem(hwnd, ID_FRUITS));
@@ -117,7 +149,7 @@ int main(void)
     HWND hwnd;
     MSG msg;
 
-    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES };
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES };
 
     InitCommonControlsEx(&icc);
     wc.lpfnWndProc = window_proc;
@@ -127,7 +159,7 @@ int main(void)
     wc.lpszClassName = CLASS_NAME;
     RegisterClassW(&wc);
     hwnd = CreateWindowExW(0, CLASS_NAME, L"Controls", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 440, NULL, NULL,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 550, NULL, NULL,
                            wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     while (GetMessageW(&msg, NULL, 0, 0) > 0)

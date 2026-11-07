@@ -485,6 +485,21 @@ struct lvitem32
     int cchTextMax;
 };
 
+/* TVITEMW as a 32-bit (WoW64) process sees it. */
+struct tvitem32
+{
+    UINT mask;
+    ULONG hItem;
+    UINT state;
+    UINT stateMask;
+    ULONG pszText;
+    int cchTextMax;
+    int iImage;
+    int iSelectedImage;
+    int cChildren;
+    ULONG lParam;
+};
+
 /* LVCOLUMNW as a 32-bit (WoW64) process sees it, up to cchTextMax. */
 struct lvcolumn32
 {
@@ -728,6 +743,11 @@ static BOOL is_list_box(const WCHAR *cls)
     return !lstrcmpiW(cls, L"ListBox") || !lstrcmpiW(cls, L"ComboLBox");
 }
 
+static BOOL is_tree_view(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"SysTreeView32");
+}
+
 /*
  * Role, states and item count of a ListBox or SysListView32 as a whole:
  * focused without a focused item, or the parent of its items. Orca never
@@ -773,7 +793,8 @@ static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *ob
 /*
  * The list window as parent of its focused item, so that Orca presents
  * the list's label when focus enters it. No MSAA: Wine's oleacc names a
- * list only by its window text.
+ * list only by its window text. A tree view is a tree; its items are its
+ * children in the order they had focus, nesting is told by their level.
  */
 static void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
 {
@@ -781,7 +802,7 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
     memset(obj, 0, sizeof(*obj));
-    if (!is_list_box(cls) && lstrcmpiW(cls, L"SysListView32"))
+    if (!is_list_box(cls) && lstrcmpiW(cls, L"SysListView32") && !is_tree_view(cls))
         return;
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->window_class = str->object_class;
@@ -792,7 +813,10 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
-    describe_list_box(hwnd, !is_list_box(cls), obj, str);
+    if (is_tree_view(cls))
+        obj->role = BRIDGE_ROLE_TREE;
+    else
+        describe_list_box(hwnd, !is_list_box(cls), obj, str);
 }
 
 /*
@@ -851,6 +875,142 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
 }
 
 /*
+ * Wine's SysTreeView32 emits no WinEvents at all (comctl32/treeview.c)
+ * and oleacc has no proxy for it, so its items are read with tree view
+ * messages. TVM_GETNEXTITEM carries no pointer; an HTREEITEM is a pointer
+ * in the target, only passed back.
+ */
+
+/* Bounds the walks over parents and siblings of a tree item. */
+#define TREE_WALK_MAX 10000
+
+static HTREEITEM tree_next(HWND hwnd, UINT flag, HTREEITEM item)
+{
+    DWORD_PTR next = 0;
+
+    if (!SendMessageTimeoutW(hwnd, TVM_GETNEXTITEM, flag, (LPARAM)item,
+                             SMTO_ABORTIFHUNG, 500, &next))
+        return NULL;
+    return (HTREEITEM)next;
+}
+
+/* The caret item of a tree view into *item, NULL if none; LIST_BUSY if it did not answer. */
+static int tree_focus(HWND hwnd, HTREEITEM *item)
+{
+    DWORD_PTR caret = 0;
+
+    *item = NULL;
+    if (!SendMessageTimeoutW(hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0,
+                             SMTO_ABORTIFHUNG, 500, &caret))
+        return LIST_BUSY;
+    *item = (HTREEITEM)caret;
+    return TRUE;
+}
+
+/*
+ * MSAA child id of a tree item, made from its handle: the items are heap
+ * blocks in the target, at least 16 bytes apart. Positive, as child ids
+ * of items are elsewhere.
+ */
+static LONG tree_child_id(HTREEITEM item)
+{
+    LONG id = (LONG)(((ULONG_PTR)item >> 4) & 0x7fffffff);
+
+    return id ? id : 1;
+}
+
+/*
+ * Describes the tree item: text, selected and expanded state, its level
+ * (from 1) and its place among its siblings. Orca takes the level from
+ * the attribute "level" of an item inside a tree (script_utilities.py,
+ * node_level) and says it when it changes. FALSE if the item could not be
+ * read.
+ */
+static BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_object *obj,
+                                   struct focus_strings *str)
+{
+    BYTE header[REMOTE_HEADER];
+    WCHAR text[CELL_TEXT_MAX];
+    HTREEITEM next;
+    struct remote r;
+    UINT state;
+    int children, i;
+    SIZE_T done;
+    BOOL ok;
+
+    if (!remote_open(hwnd, &r))
+        return FALSE;
+    memset(header, 0, sizeof(header));
+    if (r.wow64)
+    {
+        struct tvitem32 *tv = (struct tvitem32 *)header;
+
+        tv->mask = TVIF_HANDLE | TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN;
+        tv->hItem = (ULONG)(ULONG_PTR)item;
+        tv->stateMask = TVIS_SELECTED | TVIS_EXPANDED;
+        tv->pszText = (ULONG)(ULONG_PTR)(r.base + REMOTE_HEADER);
+        tv->cchTextMax = CELL_TEXT_MAX;
+    }
+    else
+    {
+        TVITEMW *tv = (TVITEMW *)header;
+
+        tv->mask = TVIF_HANDLE | TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN;
+        tv->hItem = item;
+        tv->stateMask = TVIS_SELECTED | TVIS_EXPANDED;
+        tv->pszText = (WCHAR *)(r.base + REMOTE_HEADER);
+        tv->cchTextMax = CELL_TEXT_MAX;
+    }
+    ok = remote_text(hwnd, &r, TVM_GETITEMW, 0, header, text) &&
+         ReadProcessMemory(r.process, r.base, header, sizeof(header), &done);
+    remote_close(&r);
+    if (!ok)
+        return FALSE;
+    if (r.wow64)
+    {
+        state = ((struct tvitem32 *)header)->state;
+        children = ((struct tvitem32 *)header)->cChildren;
+    }
+    else
+    {
+        state = ((TVITEMW *)header)->state;
+        children = ((TVITEMW *)header)->cChildren;
+    }
+
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = tree_child_id(item);
+    obj->role = BRIDGE_ROLE_TREE_ITEM;
+    obj->value = NULL;
+    to_utf8(text, str->object, sizeof(str->object));
+    obj->name = str->object;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
+    if (state & TVIS_SELECTED)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    /* cChildren may be a callback (I_CHILDRENCALLBACK), or 0 with children. */
+    if (children || tree_next(hwnd, TVGN_CHILD, item))
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_EXPANDABLE) |
+                       BRIDGE_STATE_BIT((state & TVIS_EXPANDED) ? BRIDGE_STATE_EXPANDED
+                                                                : BRIDGE_STATE_COLLAPSED);
+
+    obj->level = 1;
+    for (next = item, i = 0; i < TREE_WALK_MAX && (next = tree_next(hwnd, TVGN_PARENT, next)); i++)
+        obj->level++;
+    obj->position = 1;
+    for (next = item, i = 0; i < TREE_WALK_MAX && (next = tree_next(hwnd, TVGN_PREVIOUS, next)); i++)
+        obj->position++;
+    obj->set_size = obj->position;
+    for (next = item, i = 0; i < TREE_WALK_MAX && (next = tree_next(hwnd, TVGN_NEXT, next)); i++)
+        obj->set_size++;
+    return TRUE;
+}
+
+/*
  * Fills obj from MSAA and the window class; the strings point into str.
  * FALSE if MSAA failed.
  */
@@ -868,8 +1028,18 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     obj->window_class = str->object_class;
     obj->text = NULL;
     str->text = NULL;
-    obj->position = obj->set_size = obj->column_count = 0;
+    obj->position = obj->set_size = obj->level = obj->column_count = 0;
     obj->columns = NULL;
+    if (id_object == OBJID_CLIENT && is_tree_view(cls))
+    {
+        /* Only the caret item can have focus; the child id just names it. */
+        HTREEITEM item;
+
+        if (tree_focus(hwnd, &item) == LIST_BUSY)
+            return FALSE;
+        if (item)
+            return describe_treeview_item(hwnd, item, obj, str);
+    }
     listview = id_object == OBJID_CLIENT && !lstrcmpiW(cls, L"SysListView32");
     if (listview)
     {
@@ -1096,8 +1266,8 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 
 /*
  * Wine's ListBox moves its caret on arrow keys without a focus event
- * (listbox.c, LISTBOX_HandleKeyDown), and SysListView32 emits no focus
- * events at all. Reports the new item as focused and returns TRUE.
+ * (listbox.c, LISTBOX_HandleKeyDown), and SysListView32 and SysTreeView32
+ * emit no focus events at all. Reports the new item as focused and returns TRUE.
  * FALSE if hwnd is no list or the caret did not move, LIST_BUSY if the
  * list did not answer.
  */
@@ -1108,6 +1278,17 @@ static int check_list_caret(HWND hwnd)
 
     if (last_focus.id_object != OBJID_CLIENT || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)))
         return FALSE;
+    if (is_tree_view(cls))
+    {
+        HTREEITEM item;
+
+        if (tree_focus(hwnd, &item) == LIST_BUSY)
+            return LIST_BUSY;
+        if (!item || tree_child_id(item) == last_focus.id_child)
+            return FALSE;
+        on_focus(hwnd, OBJID_CLIENT, tree_child_id(item));
+        return TRUE;
+    }
     if (!lstrcmpiW(cls, L"SysListView32"))
     {
         caret = listview_focus(hwnd);

@@ -12,7 +12,7 @@ BUILD=build
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
-python3 tests/atspi-events.py 19 > "$LOG" 2>&1 &
+python3 tests/atspi-events.py 24 > "$LOG" 2>&1 &
 events=$!
 sleep 1
 wine $BUILD/controls.exe.so &
@@ -26,12 +26,18 @@ sleep 2
 # Tab to "Files:" (report view): the table itself, 3x3, no focused row;
 # Down must focus cell 'readme.txt' 0,0 with row ['readme.txt', '2 KB',
 # 'Text'] and headers ['Name', 'Size', 'Type'], Down then 'notes.md'.
+# Tab to "Places:" (tree): Wine selects the first item, so focus on tree
+# item 'Home' 1/3 level=1 collapsed in tree 'Places:'; Right expands it
+# (state-changed:expanded), Down 'Documents' 1/2 level=2, Down 'Music'
+# 2/2, Left back to 'Home', Left collapses it, Down 'Work' 2/3.
 # Escape closes the window.
-timeout 30 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
+timeout 40 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:down w:500 k:down w:500 \
     k:tab w:500 \
     k:tab w:500 k:down w:500 k:shift+down w:500 \
-    k:tab w:500 k:down w:500 k:down w:500
+    k:tab w:500 k:down w:500 k:down w:500 \
+    k:tab w:500 k:right w:500 k:down w:500 k:down w:500 \
+    k:left w:500 k:left w:500 k:down w:500
 python3 tests/atspi-dump.py controls > $BUILD/dump-running.log 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so k:escape w:1000
 

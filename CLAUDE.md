@@ -249,6 +249,16 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   first, then cells row by row (`cell_index` in `atspi.c`). Confirmed
   with Orca on a report-view list view (2026-11-07), including
   Ctrl+arrows and Ctrl+Space.
+- A tree item gets its level from the attribute `level` (from 1) when it
+  has a `tree` ancestor (`script_utilities.py`, `node_level`); the level
+  is spoken only when it changes. `state-changed:expanded` on the focused
+  object presents it again (`_on_expanded_changed`). As an ancestor, a
+  `tree` or `tree table` is never spoken, name included
+  (`_generate_tree` -> `_generate_default_presentation` returns only the
+  empty prefix for an ancestor), so a tree's label is heard only through
+  Where Am I. Wine's tree view selects its first item on `WM_SETFOCUS`,
+  so focus goes straight to an item. Decided (2026-11-07): left as in
+  GTK, no workaround in the bridge.
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it

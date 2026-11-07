@@ -328,6 +328,7 @@ struct node
     gint selection_end;
     gint position;          /* from 1, 0 if not a list item */
     gint set_size;          /* items of a list, rows of a table */
+    gint level;             /* of a tree item, from 1; 0 otherwise */
     gboolean placeholder;   /* list item not described yet, see item_at */
     /* Table: columns and their header texts. Cell or header: its place, from 0. */
     gint column_count;
@@ -445,6 +446,7 @@ static const char *state_name(guint state)
     {
     case BRIDGE_STATE_ACTIVE: return "active";
     case BRIDGE_STATE_CHECKED: return "checked";
+    case BRIDGE_STATE_COLLAPSED: return "collapsed";
     case BRIDGE_STATE_EDITABLE: return "editable";
     case BRIDGE_STATE_ENABLED: return "enabled";
     case BRIDGE_STATE_EXPANDABLE: return "expandable";
@@ -871,6 +873,14 @@ static void method_call(GDBusConnection *conn, const char *sender,
 
             g_snprintf(num, sizeof(num), "%d", node->set_size);
             g_variant_builder_add(&b, "{ss}", "setsize", num);
+        }
+        /* Orca's level of a tree item, as in ARIA (script_utilities.py). */
+        if (node->level > 0)
+        {
+            char num[16];
+
+            g_snprintf(num, sizeof(num), "%d", node->level);
+            g_variant_builder_add(&b, "{ss}", "level", num);
         }
         ret = g_variant_new("(a{ss})", &b);
     }
@@ -1324,6 +1334,7 @@ static void update_node(struct node *node, const struct bridge_object *obj)
     node->role = obj->role;
     node->position = obj->position;
     node->set_size = obj->set_size;
+    node->level = obj->level;
     if (g_strcmp0(node->window_class, obj->window_class))
     {
         g_free(node->window_class);
@@ -1409,6 +1420,7 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         node->window_class = g_strdup(obj->window_class);
         node->position = obj->position;
         node->set_size = obj->set_size;
+        node->level = obj->level;
         if (obj->text)
             set_text(node, obj, FALSE);
         set_row(node, obj);
