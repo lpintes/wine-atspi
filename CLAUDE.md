@@ -229,6 +229,8 @@ Found with the bridge's autostart (`build/exp-autostart/`, prefix
 - One bridge per prefix: a named mutex `WineAtspiBridge`. A second
   bridge exits at once. Tests run their own bridge, so they call
   `uninstall` and `wineserver -k` first.
+- Confirmed with Orca (2026-11-07): after `wine-atspi install`, a plain
+  `wine regedit` is accessible without `bridge.sh`.
 
 ## Verified in Orca's source
 
