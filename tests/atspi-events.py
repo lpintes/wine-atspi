@@ -85,9 +85,14 @@ def describe_value(obj):
     if obj.get_value_iface() is None:
         return ""
     value = Atspi.Value
-    return " value=%g [%g..%g step %g]" % (
+    text = " value=%g [%g..%g step %g]" % (
         value.get_current_value(obj), value.get_minimum_value(obj),
         value.get_maximum_value(obj), value.get_minimum_increment(obj))
+    # Orca ignores value changes of a progress bar without a size.
+    if obj.get_component_iface() is not None:
+        rect = Atspi.Component.get_extents(obj, Atspi.CoordType.WINDOW)
+        text += " rect=%d,%d %dx%d" % (rect.x, rect.y, rect.width, rect.height)
+    return text
 
 
 def describe_text(obj):

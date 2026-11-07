@@ -40,6 +40,8 @@ sleep 2
 # 'Advanced' again, each selected.
 # Tab to "Volume:" (trackbar): slider 'Volume:' value=50 [0..100 step 1];
 # Right gives accessible-value 51, Page Up 41, End 100.
+# The "Level:" progress bar follows it without focus: each change gives
+# accessible-value on progress bar 'Level:' (51, 41, 100) with a rect.
 # Escape closes the window.
 timeout 45 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:down w:500 k:down w:500 \

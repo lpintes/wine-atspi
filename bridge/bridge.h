@@ -134,6 +134,16 @@ struct bridge_object
     double maximum;
     double current;
     double increment;
+    /*
+     * Screen rectangle of a whole window (AT-SPI Component), valid if
+     * has_extents is non-zero. Orca ignores value changes of a progress
+     * bar without a size.
+     */
+    int has_extents;
+    int x;
+    int y;
+    int width;
+    int height;
 };
 
 /*
@@ -184,6 +194,14 @@ void atspi_post_focus(const struct bridge_focus *focus);
  * are ignored. Copies everything; callable from any thread.
  */
 void atspi_post_update(unsigned int pid, const struct bridge_object *object);
+
+/*
+ * Reports a changed value of an object that need not have focus, e.g. a
+ * progress bar. Unlike atspi_post_update, a new object is added below
+ * frame first (container is ignored); focus and the active window stay.
+ * Copies everything; callable from any thread.
+ */
+void atspi_post_value(const struct bridge_focus *change);
 
 /*
  * Reports a key to the registry, for screen readers that get keys only

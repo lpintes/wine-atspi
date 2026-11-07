@@ -290,6 +290,20 @@ static void refine_class_states(HWND hwnd, struct bridge_object *obj)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_INDETERMINATE);
 }
 
+/* Screen rectangle of a whole window. Items have none. */
+static void get_extents(HWND hwnd, struct bridge_object *obj)
+{
+    RECT rect;
+
+    obj->has_extents = GetWindowRect(hwnd, &rect);
+    if (!obj->has_extents)
+        return;
+    obj->x = rect.left;
+    obj->y = rect.top;
+    obj->width = rect.right - rect.left;
+    obj->height = rect.bottom - rect.top;
+}
+
 /*
  * Position and range of a trackbar or progress bar. Wine's oleacc has no
  * proxy for either; their messages carry no pointers, so they work across
@@ -980,6 +994,7 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
     }
     else
         describe_list_box(hwnd, !is_list_box(cls), obj, str);
+    get_extents(hwnd, obj);
 }
 
 /*
@@ -1194,6 +1209,7 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     obj->position = obj->set_size = obj->level = obj->column_count = 0;
     obj->columns = NULL;
     obj->has_range = FALSE;
+    obj->has_extents = FALSE;
     if (id_object == OBJID_CLIENT && is_tree_view(cls))
     {
         /* Only the caret item can have focus; the child id just names it. */
@@ -1286,6 +1302,8 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         find_label(hwnd, str->object, sizeof(str->object));
     if ((listview || listbox) && !obj->child)
         describe_list_box(hwnd, listview, obj, str);
+    if (!obj->child)
+        get_extents(hwnd, obj);
 
     SysFreeString(name);
     VariantClear(&role);
@@ -1311,6 +1329,7 @@ static void describe_frame(HWND hwnd, struct bridge_object *obj,
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
     get_window_text(hwnd, str->frame, sizeof(str->frame));
     obj->name = str->frame;
+    get_extents(hwnd, obj);
 }
 
 /*
@@ -1785,6 +1804,40 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM wparam, LPARAM lparam)
     return CallNextHookEx(NULL, code, wparam, lparam);
 }
 
+/*
+ * A progress bar never has focus, yet Orca presents its value changes
+ * (default.py, _on_value_changed). Wine's comctl32 notifies
+ * EVENT_OBJECT_VALUECHANGE for it; other controls' value changes come
+ * with the key check of the focused object.
+ */
+static void on_value_change(HWND hwnd, LONG id_object, LONG id_child)
+{
+    struct bridge_focus change;
+    struct focus_strings str;
+    WCHAR cls[64];
+    HWND top;
+    DWORD pid = 0;
+
+    if (id_object != OBJID_CLIENT || id_child != CHILDID_SELF ||
+        !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"msctls_progress32") ||
+        !IsWindowVisible(hwnd))
+        return;
+    if (!(top = GetAncestor(hwnd, GA_ROOT)))
+        return;
+    memset(&change, 0, sizeof(change));
+    if (!describe_object(hwnd, id_object, id_child, &change.object, &str))
+        return;
+    describe_frame(top, &change.frame, &str);
+    GetWindowThreadProcessId(hwnd, &pid);
+    change.pid = pid;
+    get_app_name(pid, str.app, sizeof(str.app));
+    change.app_name = str.app;
+    watch_process(pid);
+    atspi_post_value(&change);
+    trace(L"value: %p name \"%S\" %d", hwnd, change.object.name, (int)change.object.current);
+    free_strings(&str);
+}
+
 static void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                                     LONG id_object, LONG id_child,
                                     DWORD thread, DWORD time)
@@ -1793,6 +1846,9 @@ static void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         return;
     switch (event)
     {
+    case EVENT_OBJECT_VALUECHANGE:
+        on_value_change(hwnd, id_object, id_child);
+        break;
     case EVENT_OBJECT_FOCUS:
         pending_focus.hwnd = hwnd;
         pending_focus.id_object = id_object;
@@ -1842,7 +1898,7 @@ static HANDLE make_system_process(void)
 /* Runs the bridge until the session shuts down or WM_QUIT arrives. */
 static int run_bridge(BOOL service)
 {
-    HWINEVENTHOOK hook, foreground_hook;
+    HWINEVENTHOOK hook, foreground_hook, value_hook;
     HHOOK keyboard;
     HANDLE thread, shutdown_event = NULL;
     DWORD wait;
@@ -1876,6 +1932,11 @@ static int run_bridge(BOOL service)
                                       WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     if (!foreground_hook)
         return 1;
+    value_hook = SetWinEventHook(EVENT_OBJECT_VALUECHANGE, EVENT_OBJECT_VALUECHANGE, NULL,
+                                 win_event_proc, 0, 0,
+                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    if (!value_hook)
+        return 1;
     keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, GetModuleHandleW(NULL), 0);
     if (!keyboard)
         return 1;
@@ -1905,6 +1966,7 @@ static int run_bridge(BOOL service)
     }
 done:
     UnhookWindowsHookEx(keyboard);
+    UnhookWinEvent(value_hook);
     UnhookWinEvent(foreground_hook);
     UnhookWinEvent(hook);
     CoUninitialize();

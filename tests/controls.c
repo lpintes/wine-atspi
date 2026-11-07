@@ -15,6 +15,8 @@
  *              Work (Reports), Trash
  *   "Sections:" SysTabControl32: General, Advanced, About
  *   "Volume:"  msctls_trackbar32, 0 to 100 at 50, page size 10
+ *   "Level:"   msctls_progress32, 0 to 100, follows "Volume:"; no tab stop
+ *   "Run"      Button: fills "Level:" from 0 to 100 in 20 s
  *   "Close"    Button
  */
 
@@ -24,7 +26,11 @@
 #define CLASS_NAME L"WineAtspiControls"
 
 enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_VOLUME,
-       ID_CLOSE };
+       ID_LEVEL, ID_RUN, ID_CLOSE };
+
+/* "Run" fills "Level:" from 0 to 100 in 20 s, as a long task would. */
+#define RUN_STEP 5
+#define RUN_INTERVAL_MS 1000
 
 static HWND add_control(HWND parent, const WCHAR *cls, const WCHAR *text, DWORD style,
                         int x, int y, int w, int h, int id)
@@ -143,6 +149,10 @@ static void add_volume(HWND parent, int y)
     SendMessageW(bar, TBM_SETRANGE, FALSE, MAKELPARAM(0, 100));
     SendMessageW(bar, TBM_SETPAGESIZE, 0, 10);
     SendMessageW(bar, TBM_SETPOS, TRUE, 50);
+    add_control(parent, L"Static", L"Level:", SS_LEFT, 10, y + 40, 100, 20, 0);
+    bar = add_control(parent, PROGRESS_CLASSW, NULL, 0, 120, y + 40, 300, 20, ID_LEVEL);
+    SendMessageW(bar, PBM_SETRANGE32, 0, 100);
+    SendMessageW(bar, PBM_SETPOS, 50, 0);
 }
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -160,8 +170,25 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         add_places(hwnd, 360);
         add_sections(hwnd, 470);
         add_volume(hwnd, 540);
+        add_control(hwnd, L"Button", L"Run", WS_TABSTOP | BS_PUSHBUTTON,
+                    120, 620, 100, 25, ID_RUN);
         add_control(hwnd, L"Button", L"Close", WS_TABSTOP | BS_PUSHBUTTON,
-                    120, 590, 100, 25, ID_CLOSE);
+                    240, 620, 100, 25, ID_CLOSE);
+        return 0;
+    case WM_TIMER:
+    {
+        HWND bar = GetDlgItem(hwnd, ID_LEVEL);
+        int pos = (int)SendMessageW(bar, PBM_GETPOS, 0, 0) + RUN_STEP;
+
+        SendMessageW(bar, PBM_SETPOS, pos, 0);
+        if (pos >= 100)
+            KillTimer(hwnd, ID_RUN);
+        return 0;
+    }
+    case WM_HSCROLL:
+        if ((HWND)lparam == GetDlgItem(hwnd, ID_VOLUME))
+            SendDlgItemMessageW(hwnd, ID_LEVEL, PBM_SETPOS,
+                                SendMessageW((HWND)lparam, TBM_GETPOS, 0, 0), 0);
         return 0;
     case WM_SETFOCUS:
         SetFocus(GetDlgItem(hwnd, ID_FRUITS));
@@ -169,6 +196,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     case WM_COMMAND:
         if (LOWORD(wparam) == ID_CLOSE || LOWORD(wparam) == IDCANCEL)
             DestroyWindow(hwnd);
+        else if (LOWORD(wparam) == ID_RUN)
+        {
+            SendDlgItemMessageW(hwnd, ID_LEVEL, PBM_SETPOS, 0, 0);
+            SetTimer(hwnd, ID_RUN, RUN_INTERVAL_MS, NULL);
+        }
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
@@ -194,7 +226,7 @@ int main(void)
     wc.lpszClassName = CLASS_NAME;
     RegisterClassW(&wc);
     hwnd = CreateWindowExW(0, CLASS_NAME, L"Controls", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 670, NULL, NULL,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 700, NULL, NULL,
                            wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     while (GetMessageW(&msg, NULL, 0, 0) > 0)

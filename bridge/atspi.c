@@ -298,6 +298,37 @@ static const char introspection_xml[] =
     "  <property name='CurrentValue' type='d' access='readwrite'/>"
     "  <property name='Text' type='s' access='read'/>"
     " </interface>"
+    " <interface name='org.a11y.atspi.Component'>"
+    "  <method name='Contains'>"
+    "   <arg direction='in' name='x' type='i'/>"
+    "   <arg direction='in' name='y' type='i'/>"
+    "   <arg direction='in' name='coord_type' type='u'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='GetAccessibleAtPoint'>"
+    "   <arg direction='in' name='x' type='i'/>"
+    "   <arg direction='in' name='y' type='i'/>"
+    "   <arg direction='in' name='coord_type' type='u'/>"
+    "   <arg direction='out' type='(so)'/>"
+    "  </method>"
+    "  <method name='GetExtents'>"
+    "   <arg direction='in' name='coord_type' type='u'/>"
+    "   <arg direction='out' type='(iiii)'/>"
+    "  </method>"
+    "  <method name='GetPosition'>"
+    "   <arg direction='in' name='coord_type' type='u'/>"
+    "   <arg direction='out' name='x' type='i'/>"
+    "   <arg direction='out' name='y' type='i'/>"
+    "  </method>"
+    "  <method name='GetSize'>"
+    "   <arg direction='out' name='width' type='i'/>"
+    "   <arg direction='out' name='height' type='i'/>"
+    "  </method>"
+    "  <method name='GetLayer'><arg direction='out' type='u'/></method>"
+    "  <method name='GetMDIZOrder'><arg direction='out' type='n'/></method>"
+    "  <method name='GrabFocus'><arg direction='out' type='b'/></method>"
+    "  <method name='GetAlpha'><arg direction='out' type='d'/></method>"
+    " </interface>"
     "</node>";
 
 #define IFACE_ACCESSIBLE "org.a11y.atspi.Accessible"
@@ -306,6 +337,12 @@ static const char introspection_xml[] =
 #define IFACE_TABLE "org.a11y.atspi.Table"
 #define IFACE_TABLE_CELL "org.a11y.atspi.TableCell"
 #define IFACE_VALUE "org.a11y.atspi.Value"
+#define IFACE_COMPONENT "org.a11y.atspi.Component"
+
+/* AtspiCoordType */
+enum { COORD_SCREEN, COORD_WINDOW, COORD_PARENT };
+/* AtspiComponentLayer */
+enum { LAYER_WIDGET = 3, LAYER_WINDOW = 7 };
 
 /* AtspiTextGranularity */
 enum { GRANULARITY_CHAR, GRANULARITY_WORD, GRANULARITY_SENTENCE, GRANULARITY_LINE,
@@ -349,6 +386,12 @@ struct node
     gdouble maximum;
     gdouble current;
     gdouble increment;
+    /* Component interface: screen rectangle, if has_extents. */
+    gboolean has_extents;
+    gint x;
+    gint y;
+    gint width;
+    gint height;
 };
 
 struct app
@@ -656,26 +699,32 @@ static GVariant *text_method(struct node *node, const char *method, GVariant *pa
     return NULL;
 }
 
-/* Interfaces of node, the first always Accessible. */
+/*
+ * Interfaces of node, the first always Accessible. The array is valid
+ * until the next call; only the AT-SPI thread calls this.
+ */
 static const char *const *node_interfaces(struct node *node, guint *count)
 {
-    static const char *const app_ifaces[] = { IFACE_ACCESSIBLE, IFACE_APPLICATION };
-    static const char *const text_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TEXT };
-    static const char *const table_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TABLE };
-    static const char *const cell_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TABLE_CELL };
-    static const char *const value_ifaces[] = { IFACE_ACCESSIBLE, IFACE_VALUE };
+    static const char *ifaces[3];
 
-    *count = 2;
+    *count = 0;
+    ifaces[(*count)++] = IFACE_ACCESSIBLE;
     if (!node->parent)
-        return app_ifaces;
+    {
+        ifaces[(*count)++] = IFACE_APPLICATION;
+        return ifaces;
+    }
     if (node->has_range)
-        return value_ifaces;
-    if (node->role == BRIDGE_ROLE_TABLE)
-        return table_ifaces;
-    if (node->role == BRIDGE_ROLE_TABLE_CELL)
-        return cell_ifaces;
-    *count = node->chars ? 2 : 1;
-    return text_ifaces;
+        ifaces[(*count)++] = IFACE_VALUE;
+    else if (node->role == BRIDGE_ROLE_TABLE)
+        ifaces[(*count)++] = IFACE_TABLE;
+    else if (node->role == BRIDGE_ROLE_TABLE_CELL)
+        ifaces[(*count)++] = IFACE_TABLE_CELL;
+    else if (node->chars)
+        ifaces[(*count)++] = IFACE_TEXT;
+    if (node->has_extents)
+        ifaces[(*count)++] = IFACE_COMPONENT;
+    return ifaces;
 }
 
 static gboolean node_has_interface(struct node *node, const char *iface)
@@ -811,6 +860,69 @@ static GVariant *table_cell_method(struct node *node, const char *method)
     return NULL;
 }
 
+/*
+ * Origin of coord_type in screen coordinates: the screen, the top-level
+ * window (child of the application) or the parent.
+ */
+static void coord_origin(struct node *node, guint coord_type, gint *x, gint *y)
+{
+    struct node *origin = NULL;
+
+    *x = *y = 0;
+    if (coord_type == COORD_PARENT)
+        origin = node->parent;
+    else if (coord_type == COORD_WINDOW)
+        for (origin = node; origin->parent && origin->parent->parent; origin = origin->parent)
+            ;
+    if (origin && origin->has_extents)
+    {
+        *x = origin->x;
+        *y = origin->y;
+    }
+}
+
+static GVariant *component_method(struct node *node, const char *method, GVariant *params)
+{
+    gint x, y, ox, oy;
+    guint coord_type;
+
+    if (!g_strcmp0(method, "GetExtents"))
+    {
+        g_variant_get(params, "(u)", &coord_type);
+        coord_origin(node, coord_type, &ox, &oy);
+        return g_variant_new("((iiii))", node->x - ox, node->y - oy, node->width, node->height);
+    }
+    if (!g_strcmp0(method, "GetPosition"))
+    {
+        g_variant_get(params, "(u)", &coord_type);
+        coord_origin(node, coord_type, &ox, &oy);
+        return g_variant_new("(ii)", node->x - ox, node->y - oy);
+    }
+    if (!g_strcmp0(method, "GetSize"))
+        return g_variant_new("(ii)", node->width, node->height);
+    if (!g_strcmp0(method, "Contains"))
+    {
+        g_variant_get(params, "(iiu)", &x, &y, &coord_type);
+        coord_origin(node, coord_type, &ox, &oy);
+        x += ox;
+        y += oy;
+        return g_variant_new("(b)", x >= node->x && x < node->x + node->width &&
+                                    y >= node->y && y < node->y + node->height);
+    }
+    if (!g_strcmp0(method, "GetAccessibleAtPoint"))
+        return g_variant_new("(@(so))", null_ref());
+    if (!g_strcmp0(method, "GetLayer"))
+        return g_variant_new("(u)", node->parent && !node->parent->parent ? LAYER_WINDOW
+                                                                          : LAYER_WIDGET);
+    if (!g_strcmp0(method, "GetMDIZOrder"))
+        return g_variant_new("(n)", (gint16)0);
+    if (!g_strcmp0(method, "GrabFocus"))
+        return g_variant_new("(b)", FALSE);
+    if (!g_strcmp0(method, "GetAlpha"))
+        return g_variant_new("(d)", 1.0);
+    return NULL;
+}
+
 static void method_call(GDBusConnection *conn, const char *sender,
                         const char *path, const char *iface,
                         const char *method, GVariant *params,
@@ -826,6 +938,8 @@ static void method_call(GDBusConnection *conn, const char *sender,
         ret = table_method(node, method, params);
     else if (!g_strcmp0(iface, IFACE_TABLE_CELL))
         ret = table_cell_method(node, method);
+    else if (!g_strcmp0(iface, IFACE_COMPONENT))
+        ret = component_method(node, method, params);
     else if (!g_strcmp0(method, "GetChildAtIndex"))
     {
         gint index;
@@ -1357,7 +1471,6 @@ static void set_row(struct node *cell, const struct bridge_object *obj)
     }
 }
 
-/* Copies obj into an existing node, announcing a changed name, state or text. */
 /*
  * Value of a slider or progress bar. Orca presents a value change of the
  * focused object, or of any progress bar (default.py, _on_value_changed).
@@ -1376,6 +1489,22 @@ static void set_range(struct node *node, const struct bridge_object *obj, gboole
              g_variant_new_double(node->current));
 }
 
+/*
+ * Screen rectangle. An object described without one (a list item) keeps
+ * the last known, so the Component interface does not come and go.
+ */
+static void set_extents(struct node *node, const struct bridge_object *obj)
+{
+    if (!obj->has_extents)
+        return;
+    node->has_extents = TRUE;
+    node->x = obj->x;
+    node->y = obj->y;
+    node->width = obj->width;
+    node->height = obj->height;
+}
+
+/* Copies obj into an existing node, announcing a changed name, state or text. */
 static void update_node(struct node *node, const struct bridge_object *obj)
 {
     guint64 changed = (node->states ^ obj->states) & ~OWN_STATES;
@@ -1426,6 +1555,7 @@ static void update_node(struct node *node, const struct bridge_object *obj)
         set_text(node, obj, TRUE);
     set_row(node, obj);
     set_range(node, obj, TRUE);
+    set_extents(node, obj);
 }
 
 /* Finds or creates the node for obj below parent and updates it. */
@@ -1477,6 +1607,7 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
             set_text(node, obj, FALSE);
         set_row(node, obj);
         set_range(node, obj, FALSE);
+        set_extents(node, obj);
     }
     sync_items(node);
     g_free(id);
@@ -1610,6 +1741,28 @@ static gboolean focus_idle(gpointer data)
     /* Announce even a repeated focus, e.g. returning from a menu. */
     obj->states &= ~BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
     set_state(obj, BRIDGE_STATE_FOCUSED, TRUE);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean value_idle(gpointer data)
+{
+    const struct bridge_focus *c = data;
+    struct app *app = get_app(c->pid, c->app_name);
+    struct node *frame, *obj;
+    char *id;
+    gboolean known;
+
+    if (!app)
+        return G_SOURCE_REMOVE;
+    frame = get_node(app, &c->frame, app->root);
+    id = object_id(&c->object);
+    known = g_hash_table_lookup(app->nodes, id) != NULL;
+    g_free(id);
+    obj = get_node(app, &c->object, frame);
+    /* get_node announces changes of known nodes only. */
+    if (!known && obj->has_range)
+        emit(obj, EVENT_OBJECT, "PropertyChange", "accessible-value", 0, 0,
+             g_variant_new_double(obj->current));
     return G_SOURCE_REMOVE;
 }
 
@@ -1755,6 +1908,17 @@ void atspi_post_update(unsigned int pid, const struct bridge_object *object)
     u->pid = pid;
     copy_object(&u->object, object);
     post(update_idle, u, free_update);
+}
+
+void atspi_post_value(const struct bridge_focus *change)
+{
+    struct bridge_focus *c = g_new0(struct bridge_focus, 1);
+
+    c->pid = change->pid;
+    c->app_name = g_strdup(change->app_name);
+    copy_object(&c->frame, &change->frame);
+    copy_object(&c->object, &change->object);
+    post(value_idle, c, free_focus);
 }
 
 /* Connection for key reports; not tied to any application. */

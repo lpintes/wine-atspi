@@ -306,6 +306,23 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   therefore gives a trackbar no `valuetext`. Wine's `oleacc` has no
   proxy for `msctls_trackbar32`; `TBM_GETPOS` / `TBM_GETRANGEMIN` /
   `TBM_GETRANGEMAX` work across processes (`describe_range`).
+- "Without size" means `Component.GetExtents(WINDOW)` gives width and
+  height 0, which is also the answer for an object without the
+  `Component` interface (`ax_component.py`, `get_rect`). So every
+  whole-window object gets `Component` with its `GetWindowRect`
+  (`get_extents` in `main.c`); list items, cells and tabs get none.
+  Progress bar speech is on by default, at most every 10 s except at
+  100 %, and only for the active application
+  (`speak-progress-bar-updates`, `progress-bar-speech-interval`,
+  `progress-bar-speech-verbosity` in `org.gnome.Orca.gschema.xml`).
+- A progress bar never has focus. Wine's comctl32 emits
+  `EVENT_OBJECT_VALUECHANGE` (`OBJID_CLIENT`) on `PBM_SETPOS`, and
+  `PBM_GETPOS` / `PBM_GETRANGE` work across processes. The bridge hooks
+  that event and adds the bar below its frame on its first change
+  (`on_value_change`, `atspi_post_value`). Confirmed with Orca on
+  `tests/controls.c` "Run" (2026-11-07): 0 %, 55 % after 10 s, 100 %.
+  A bar that changes together with a focused slider is not heard: Orca
+  interrupts its speech for the slider's value at once.
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it
