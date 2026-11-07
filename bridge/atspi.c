@@ -291,6 +291,13 @@ static const char introspection_xml[] =
     "  <method name='GetColumnHeaderCells'><arg direction='out' type='a(so)'/></method>"
     "  <method name='GetRowHeaderCells'><arg direction='out' type='a(so)'/></method>"
     " </interface>"
+    " <interface name='org.a11y.atspi.Value'>"
+    "  <property name='MinimumValue' type='d' access='read'/>"
+    "  <property name='MaximumValue' type='d' access='read'/>"
+    "  <property name='MinimumIncrement' type='d' access='read'/>"
+    "  <property name='CurrentValue' type='d' access='readwrite'/>"
+    "  <property name='Text' type='s' access='read'/>"
+    " </interface>"
     "</node>";
 
 #define IFACE_ACCESSIBLE "org.a11y.atspi.Accessible"
@@ -298,6 +305,7 @@ static const char introspection_xml[] =
 #define IFACE_TEXT "org.a11y.atspi.Text"
 #define IFACE_TABLE "org.a11y.atspi.Table"
 #define IFACE_TABLE_CELL "org.a11y.atspi.TableCell"
+#define IFACE_VALUE "org.a11y.atspi.Value"
 
 /* AtspiTextGranularity */
 enum { GRANULARITY_CHAR, GRANULARITY_WORD, GRANULARITY_SENTENCE, GRANULARITY_LINE,
@@ -335,6 +343,12 @@ struct node
     char **headers;
     gint row;
     gint column;
+    /* Value interface of a slider or progress bar, if has_range. */
+    gboolean has_range;
+    gdouble minimum;
+    gdouble maximum;
+    gdouble current;
+    gdouble increment;
 };
 
 struct app
@@ -452,11 +466,13 @@ static const char *state_name(guint state)
     case BRIDGE_STATE_EXPANDABLE: return "expandable";
     case BRIDGE_STATE_EXPANDED: return "expanded";
     case BRIDGE_STATE_FOCUSED: return "focused";
+    case BRIDGE_STATE_HORIZONTAL: return "horizontal";
     case BRIDGE_STATE_INDETERMINATE: return "indeterminate";
     case BRIDGE_STATE_PRESSED: return "pressed";
     case BRIDGE_STATE_READ_ONLY: return "read-only";
     case BRIDGE_STATE_SELECTED: return "selected";
     case BRIDGE_STATE_SENSITIVE: return "sensitive";
+    case BRIDGE_STATE_VERTICAL: return "vertical";
     }
     return NULL;
 }
@@ -647,10 +663,13 @@ static const char *const *node_interfaces(struct node *node, guint *count)
     static const char *const text_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TEXT };
     static const char *const table_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TABLE };
     static const char *const cell_ifaces[] = { IFACE_ACCESSIBLE, IFACE_TABLE_CELL };
+    static const char *const value_ifaces[] = { IFACE_ACCESSIBLE, IFACE_VALUE };
 
     *count = 2;
     if (!node->parent)
         return app_ifaces;
+    if (node->has_range)
+        return value_ifaces;
     if (node->role == BRIDGE_ROLE_TABLE)
         return table_ifaces;
     if (node->role == BRIDGE_ROLE_TABLE_CELL)
@@ -944,6 +963,17 @@ static GVariant *get_property(GDBusConnection *conn, const char *sender,
         return g_variant_new("(ii)", node->row, node->column);
     if (!g_strcmp0(prop, "Table"))
         return parent_ref(node);
+    if (!g_strcmp0(prop, "MinimumValue"))
+        return g_variant_new_double(node->minimum);
+    if (!g_strcmp0(prop, "MaximumValue"))
+        return g_variant_new_double(node->maximum);
+    if (!g_strcmp0(prop, "MinimumIncrement"))
+        return g_variant_new_double(node->increment);
+    if (!g_strcmp0(prop, "CurrentValue"))
+        return g_variant_new_double(node->current);
+    /* Empty: Orca then speaks the number itself (ax_value.py). */
+    if (!g_strcmp0(prop, "Text"))
+        return g_variant_new_string("");
     g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_PROPERTY,
                 "%s not supported", prop);
     return NULL;
@@ -1328,6 +1358,24 @@ static void set_row(struct node *cell, const struct bridge_object *obj)
 }
 
 /* Copies obj into an existing node, announcing a changed name, state or text. */
+/*
+ * Value of a slider or progress bar. Orca presents a value change of the
+ * focused object, or of any progress bar (default.py, _on_value_changed).
+ */
+static void set_range(struct node *node, const struct bridge_object *obj, gboolean announce)
+{
+    gboolean changed = node->has_range && obj->has_range && node->current != obj->current;
+
+    node->has_range = obj->has_range;
+    node->minimum = obj->minimum;
+    node->maximum = obj->maximum;
+    node->current = obj->current;
+    node->increment = obj->increment;
+    if (changed && announce)
+        emit(node, EVENT_OBJECT, "PropertyChange", "accessible-value", 0, 0,
+             g_variant_new_double(node->current));
+}
+
 static void update_node(struct node *node, const struct bridge_object *obj)
 {
     guint64 changed = (node->states ^ obj->states) & ~OWN_STATES;
@@ -1377,6 +1425,7 @@ static void update_node(struct node *node, const struct bridge_object *obj)
     if (obj->text)
         set_text(node, obj, TRUE);
     set_row(node, obj);
+    set_range(node, obj, TRUE);
 }
 
 /* Finds or creates the node for obj below parent and updates it. */
@@ -1427,6 +1476,7 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         if (obj->text)
             set_text(node, obj, FALSE);
         set_row(node, obj);
+        set_range(node, obj, FALSE);
     }
     sync_items(node);
     g_free(id);

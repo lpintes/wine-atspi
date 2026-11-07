@@ -17,7 +17,7 @@ wineserver -k; wineserver -w
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
-python3 tests/atspi-events.py 28 > "$LOG" 2>&1 &
+python3 tests/atspi-events.py 32 > "$LOG" 2>&1 &
 events=$!
 sleep 1
 wine $BUILD/controls.exe.so &
@@ -38,6 +38,8 @@ sleep 2
 # Tab to "Sections:" (tabs): page tab 'General' 1/3 selected in page tab
 # list 'Sections:'; Right 'Advanced' 2/3, Right 'About' 3/3, Left
 # 'Advanced' again, each selected.
+# Tab to "Volume:" (trackbar): slider 'Volume:' value=50 [0..100 step 1];
+# Right gives accessible-value 51, Page Up 41, End 100.
 # Escape closes the window.
 timeout 45 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:down w:500 k:down w:500 \
@@ -46,7 +48,8 @@ timeout 45 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:tab w:500 k:down w:500 k:down w:500 \
     k:tab w:500 k:right w:500 k:down w:500 k:down w:500 \
     k:left w:500 k:left w:500 k:down w:500 \
-    k:tab w:500 k:right w:500 k:right w:500 k:left w:500
+    k:tab w:500 k:right w:500 k:right w:500 k:left w:500 \
+    k:tab w:500 k:right w:500 k:pgup w:500 k:end w:500
 python3 tests/atspi-dump.py controls > $BUILD/dump-running.log 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so k:escape w:1000
 

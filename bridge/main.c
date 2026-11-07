@@ -290,6 +290,44 @@ static void refine_class_states(HWND hwnd, struct bridge_object *obj)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_INDETERMINATE);
 }
 
+/*
+ * Position and range of a trackbar or progress bar. Wine's oleacc has no
+ * proxy for either; their messages carry no pointers, so they work across
+ * processes.
+ */
+static void describe_range(HWND hwnd, const WCHAR *cls, struct bridge_object *obj)
+{
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    DWORD_PTR pos, low, high, step = 0;
+    BOOL vertical;
+
+    if (!lstrcmpiW(cls, L"msctls_trackbar32"))
+    {
+        if (!SendMessageTimeoutW(hwnd, TBM_GETPOS, 0, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
+            !SendMessageTimeoutW(hwnd, TBM_GETRANGEMIN, 0, 0, SMTO_ABORTIFHUNG, 500, &low) ||
+            !SendMessageTimeoutW(hwnd, TBM_GETRANGEMAX, 0, 0, SMTO_ABORTIFHUNG, 500, &high))
+            return;
+        SendMessageTimeoutW(hwnd, TBM_GETLINESIZE, 0, 0, SMTO_ABORTIFHUNG, 500, &step);
+        vertical = (style & TBS_VERT) != 0;
+    }
+    else if (!lstrcmpiW(cls, L"msctls_progress32"))
+    {
+        if (!SendMessageTimeoutW(hwnd, PBM_GETPOS, 0, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
+            !SendMessageTimeoutW(hwnd, PBM_GETRANGE, TRUE, 0, SMTO_ABORTIFHUNG, 500, &low) ||
+            !SendMessageTimeoutW(hwnd, PBM_GETRANGE, FALSE, 0, SMTO_ABORTIFHUNG, 500, &high))
+            return;
+        vertical = (style & PBS_VERTICAL) != 0;
+    }
+    else
+        return;
+    obj->has_range = TRUE;
+    obj->current = (int)pos;
+    obj->minimum = (int)low;
+    obj->maximum = (int)high;
+    obj->increment = (int)step;
+    obj->states |= BRIDGE_STATE_BIT(vertical ? BRIDGE_STATE_VERTICAL : BRIDGE_STATE_HORIZONTAL);
+}
+
 /* MSAA only says "text"; the window style tells entry from multi-line. */
 static void refine_text(HWND hwnd, LONG msaa_state, struct bridge_object *obj)
 {
@@ -1155,6 +1193,7 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     str->text = NULL;
     obj->position = obj->set_size = obj->level = obj->column_count = 0;
     obj->columns = NULL;
+    obj->has_range = FALSE;
     if (id_object == OBJID_CLIENT && is_tree_view(cls))
     {
         /* Only the caret item can have focus; the child id just names it. */
@@ -1226,6 +1265,8 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         obj->role = BRIDGE_ROLE_PANEL;
     if (obj->role == BRIDGE_ROLE_TEXT)
         refine_text(hwnd, msaa_state, obj);
+    if (!obj->child && (obj->role == BRIDGE_ROLE_SLIDER || obj->role == BRIDGE_ROLE_PROGRESS_BAR))
+        describe_range(hwnd, cls, obj);
     if (!obj->child && has_edit_text(cls) &&
         (obj->role == BRIDGE_ROLE_TEXT || obj->role == BRIDGE_ROLE_ENTRY ||
          obj->role == BRIDGE_ROLE_PASSWORD_TEXT))

@@ -20,6 +20,7 @@ EVENTS = [
     "object:state-changed",
     "object:children-changed",
     "object:property-change:accessible-name",
+    "object:property-change:accessible-value",
     "object:selection-changed",
     "object:announcement",
     "object:text-changed",
@@ -52,6 +53,7 @@ def describe(obj):
             text += " collapsed"
         text += describe_text(obj)
         text += describe_table(obj)
+        text += describe_value(obj)
         return text
     except GLib.Error as e:
         return "<%s>" % e.message
@@ -76,6 +78,16 @@ def describe_table(obj):
         headers.append(header.get_name() if header is not None else None)
     own = [h.get_name() for h in Atspi.TableCell.get_column_header_cells(obj)]
     return " cell=%d,%d row=%r headers=%r own=%r" % (row, column, cells, headers, own)
+
+
+def describe_value(obj):
+    """Current value and range, as Orca reads a slider or progress bar."""
+    if obj.get_value_iface() is None:
+        return ""
+    value = Atspi.Value
+    return " value=%g [%g..%g step %g]" % (
+        value.get_current_value(obj), value.get_minimum_value(obj),
+        value.get_maximum_value(obj), value.get_minimum_increment(obj))
 
 
 def describe_text(obj):

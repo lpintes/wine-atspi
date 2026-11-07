@@ -297,6 +297,15 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   page tab, so the page tab list and its label are never spoken, as in
   GTK. "x of y" again only with `speak-position-in-set`. Confirmed with
   Orca on `tests/controls.c` (2026-11-07).
+- A slider's value comes from the attribute `valuetext` first, then
+  `Value.Text`, then the formatted `CurrentValue` (`ax_value.py`); Orca
+  adds the percentage from minimum and maximum. It presents
+  `object:property-change:accessible-value` for the focused object and
+  for any progress bar, except one without size or inside a status bar
+  (`_on_value_changed`, `is_presentable_value_change`). The bridge
+  therefore gives a trackbar no `valuetext`. Wine's `oleacc` has no
+  proxy for `msctls_trackbar32`; `TBM_GETPOS` / `TBM_GETRANGEMIN` /
+  `TBM_GETRANGEMAX` work across processes (`describe_range`).
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it

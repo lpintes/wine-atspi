@@ -70,6 +70,7 @@ enum bridge_state
     BRIDGE_STATE_EXPANDED = 10,
     BRIDGE_STATE_FOCUSABLE = 11,
     BRIDGE_STATE_FOCUSED = 12,
+    BRIDGE_STATE_HORIZONTAL = 14,
     BRIDGE_STATE_MULTI_LINE = 17,
     BRIDGE_STATE_MULTISELECTABLE = 18,
     BRIDGE_STATE_PRESSED = 20,
@@ -78,6 +79,7 @@ enum bridge_state
     BRIDGE_STATE_SENSITIVE = 24,
     BRIDGE_STATE_SHOWING = 25,
     BRIDGE_STATE_SINGLE_LINE = 26,
+    BRIDGE_STATE_VERTICAL = 29,
     BRIDGE_STATE_VISIBLE = 30,
     BRIDGE_STATE_INDETERMINATE = 32,
     BRIDGE_STATE_READ_ONLY = 43,
@@ -122,6 +124,16 @@ struct bridge_object
      */
     int column_count;
     const char *const *columns;
+    /*
+     * Numeric value of a slider or progress bar (AT-SPI Value interface),
+     * valid if has_range is non-zero. increment is the step of one arrow
+     * key, 0 if unknown.
+     */
+    int has_range;
+    double minimum;
+    double maximum;
+    double current;
+    double increment;
 };
 
 /*
