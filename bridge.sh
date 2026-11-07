@@ -2,10 +2,11 @@
 # Run a Windows program under the bridge for a manual test with Orca.
 # Usage: ./bridge.sh PROGRAM [ARGS...]   e.g. ./bridge.sh notepad
 #
-# Starts the bridge in the test prefix unless it already runs there, then
-# runs the program in the foreground. When the program ends, a bridge
-# started by this script is stopped again. Bridge output (with
-# WINE_ATSPI_DEBUG traces) goes to build/bridge.log.
+# Installs the bridge in the test prefix (HKLM RunServices), which also
+# starts it unless it already runs there, then runs the program in the
+# foreground. From then on every Wine session of the prefix starts the
+# bridge, and it ends with the session. Bridge traces are appended to
+# build/bridge.log. `wine build/wine-atspi.exe.so uninstall` undoes it.
 
 set -u
 cd "$(dirname "$0")"
@@ -31,27 +32,6 @@ if [ ! -d "$WINEPREFIX" ]; then
     wineserver -w
 fi
 
-bridge=
-# The brackets keep the pattern from matching a command line quoting it.
-if ! pgrep -f '[w]ine-atspi\.exe' > /dev/null; then
-    WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
-    bridge=$!
-    sleep 2
-    if ! kill -0 $bridge 2> /dev/null; then
-        echo "bridge failed to start, see $BUILD/bridge.log" >&2
-        exit 1
-    fi
-    echo "bridge started, log: $BUILD/bridge.log"
-else
-    echo "bridge already running"
-fi
-
-wine "$@"
-status=$?
-
-if [ -n "$bridge" ]; then
-    kill $bridge 2> /dev/null
-    wait $bridge 2> /dev/null
-    echo "bridge stopped"
-fi
-exit $status
+wine $BUILD/wine-atspi.exe.so install --log $BUILD/bridge.log || exit 1
+echo "log: $BUILD/bridge.log"
+exec wine "$@"

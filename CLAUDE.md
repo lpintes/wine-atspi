@@ -199,6 +199,31 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   binary imports msvcrt through Wine, and a libc name could bind to an
   ms_abi msvcrt thunk. Not proven to break, just avoided.
 
+Found with the bridge's autostart (`build/exp-autostart/`, prefix
+`~/.wine-atspi-exp`, Wine 11.21, 2026-11-07).
+
+- Every session start runs `wineboot.exe --init` (`ntdll/unix/env.c`,
+  `run_wineboot`), which starts the values of HKLM `RunServices` but not
+  `Run` (`programs/wineboot/wineboot.c`). `wine-atspi install` writes
+  `"<exe>" --service [--log FILE]` there, so any program that starts a
+  session (Steam, Lutris, a `.desktop` file) gets the bridge. The ELF
+  starts directly from that value; `GetModuleFileNameW` gives
+  `...\build\wine-atspi.exe` without `.so`, and that works too.
+- Started so, the bridge has no Win32 std handles and does not see the
+  environment of the first `wine` command, but inherits its Unix fd 2
+  (GLib's `g_printerr` lines show there). Hence `--log`, appended,
+  because even `wine reg ...` starts a session with a bridge.
+- A normal process keeps the session alive. With `--service` the bridge
+  calls `NtSetInformationProcess` with class 1000
+  (`ProcessWineMakeProcessSystem`, declared only under `__WINESRC__`),
+  like `services.exe`. Its threads then do not count as desktop users,
+  and the returned event is signaled when the session shuts down
+  (`server/process.c`, about 3 s after the last user process). The bridge
+  waits for it with `MsgWaitForMultipleObjects`; both hooks keep working.
+- One bridge per prefix: a named mutex `WineAtspiBridge`. A second
+  bridge exits at once. Tests run their own bridge, so they call
+  `uninstall` and `wineserver -k` first.
+
 ## Verified in Orca's source
 
 Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,

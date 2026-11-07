@@ -9,6 +9,11 @@ export WINEDEBUG=${WINEDEBUG:--all}
 LOG=${1:-build/bridge-notepad.log}
 BUILD=build
 
+# The test runs its own bridge with traces on stderr: drop one installed
+# by bridge.sh, and the session its uninstall command started.
+wine $BUILD/wine-atspi.exe.so uninstall > /dev/null 2>&1
+wineserver -k; wineserver -w
+
 # The Open dialog starts in the folder last used in it; start in the
 # repository root, whose file list the test expects.
 wine reg delete 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedMRU' \
