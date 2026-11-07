@@ -112,12 +112,17 @@ struct bridge_object
     int set_size;
 };
 
-/* Focus moved to object, which lives in top-level window frame. */
+/*
+ * Focus moved to object, which lives in top-level window frame. An item
+ * of a list lives in container, the list window; container.hwnd is 0 if
+ * object is a direct child of frame.
+ */
 struct bridge_focus
 {
     unsigned int pid;
     const char *app_name;       /* executable name, e.g. "notepad.exe" */
     struct bridge_object frame;
+    struct bridge_object container;
     struct bridge_object object;
 };
 

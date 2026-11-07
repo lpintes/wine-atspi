@@ -21,6 +21,7 @@ EVENTS = [
     "object:children-changed",
     "object:property-change:accessible-name",
     "object:selection-changed",
+    "object:announcement",
     "object:text-changed",
     "object:text-caret-moved",
     "object:text-selection-changed",
@@ -84,7 +85,7 @@ def on_event(event, toolkit):
         if app is None or app.get_toolkit_name() != toolkit:
             return
         detail = "%d" % event.detail1
-        if event.type.startswith("object:text-changed"):
+        if event.type.startswith(("object:text-changed", "object:announcement")):
             detail += ",%d,%r" % (event.detail2, event.any_data)
         print("%s(%s) app=%r src=%s | %s" % (
             event.type, detail, app.get_name(), describe(event.source),

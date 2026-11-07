@@ -23,6 +23,8 @@
 #define ATSPI_ROOT_PATH ATSPI_PREFIX "/root"
 #define ATSPI_NULL_PATH "/org/a11y/atspi/null"
 #define EVENT_OBJECT "org.a11y.atspi.Event.Object"
+#define ATSPI_LIVE_POLITE 1
+#define XK_SPACE 0x20
 #define EVENT_WINDOW "org.a11y.atspi.Event.Window"
 
 static const char introspection_xml[] =
@@ -217,6 +219,7 @@ struct node
     gint selection_end;
     gint position;          /* from 1, 0 if not a list item */
     gint set_size;
+    gboolean placeholder;   /* list item not described yet, see item_at */
 };
 
 struct app
@@ -237,6 +240,7 @@ static GDBusNodeInfo *introspection;
 static GHashTable *apps;            /* pid -> struct app * */
 static struct node *active_frame;
 static struct node *focused;
+static guint last_keysym;           /* last key pressed, see key_idle */
 
 static const char *role_name(guint32 role)
 {
@@ -559,6 +563,9 @@ static void set_state(struct node *node, guint state, gboolean on)
         emit(node, EVENT_OBJECT, "StateChanged", name, on, 0, g_variant_new_int32(0));
 }
 
+static gboolean is_item_list(struct node *node);
+static struct node *child_at(struct node *node, guint index);
+
 static void method_call(GDBusConnection *conn, const char *sender,
                         const char *path, const char *iface,
                         const char *method, GVariant *params,
@@ -576,7 +583,7 @@ static void method_call(GDBusConnection *conn, const char *sender,
 
         g_variant_get(params, "(i)", &index);
         if (index >= 0 && index < (gint)node->children->len)
-            ret = g_variant_new("(@(so))", node_ref(node->children->pdata[index]));
+            ret = g_variant_new("(@(so))", node_ref(child_at(node, index)));
         else
             ret = g_variant_new("((so))", "", ATSPI_NULL_PATH);
     }
@@ -586,7 +593,7 @@ static void method_call(GDBusConnection *conn, const char *sender,
 
         g_variant_builder_init(&b, G_VARIANT_TYPE("a(so)"));
         for (i = 0; i < node->children->len; i++)
-            g_variant_builder_add_value(&b, node_ref(node->children->pdata[i]));
+            g_variant_builder_add_value(&b, node_ref(child_at(node, i)));
         ret = g_variant_new("(a(so))", &b);
     }
     else if (!g_strcmp0(method, "GetIndexInParent"))
@@ -796,7 +803,8 @@ static void node_free(struct node *node)
     guint i;
 
     for (i = 0; i < node->children->len; i++)
-        node_free(node->children->pdata[i]);
+        if (node->children->pdata[i])
+            node_free(node->children->pdata[i]);
     if (focused == node)
         focused = NULL;
     if (active_frame == node)
@@ -819,7 +827,11 @@ static void node_remove(struct node *node)
 
     if (parent && index >= 0)
     {
-        g_ptr_array_remove_index(parent->children, index);
+        /* An item list keeps its slots, see is_item_list. */
+        if (is_item_list(parent))
+            parent->children->pdata[index] = NULL;
+        else
+            g_ptr_array_remove_index(parent->children, index);
         emit(parent, EVENT_OBJECT, "ChildrenChanged", "remove", index, 0,
              node_ref(node));
     }
@@ -830,6 +842,76 @@ static char *object_id(const struct bridge_object *obj)
 {
     return g_strdup_printf("w%" G_GINT64_MODIFIER "x_%u",
                            (guint64)obj->hwnd, obj->child);
+}
+
+/*
+ * The children of a list box are its items in list order, one slot per
+ * item (set_size), so that Orca gets the right count: for a list box it
+ * says "list with n available items" when fewer children than setsize
+ * are sensitive (speech_generator.py, _generate_number_of_children).
+ * Only items that had focus are known; the other slots are NULL until
+ * asked for, then filled by placeholders.
+ */
+static gboolean is_item_list(struct node *node)
+{
+    return node->role == BRIDGE_ROLE_LIST_BOX;
+}
+
+static void sync_items(struct node *list)
+{
+    guint count = MAX(list->set_size, 0);
+    GPtrArray *children = list->children;
+
+    if (!is_item_list(list))
+        return;
+    while (children->len > count)
+    {
+        struct node *child = children->pdata[children->len - 1];
+
+        g_ptr_array_set_size(children, children->len - 1);
+        if (child)
+        {
+            emit(list, EVENT_OBJECT, "ChildrenChanged", "remove", children->len, 0,
+                 node_ref(child));
+            node_free(child);
+        }
+    }
+    g_ptr_array_set_size(children, count);
+}
+
+/* Item index of an item list as a node; a placeholder if not known yet. */
+static struct node *item_at(struct node *list, guint index)
+{
+    struct node *item = list->children->pdata[index];
+    char *id;
+
+    if (item)
+        return item;
+    id = g_strdup_printf("%.*s%u", (int)(g_strrstr(list->id, "_") + 1 - list->id),
+                         list->id, index + 1);
+    item = node_new(list->app, id, NULL);
+    g_free(id);
+    item->parent = list;
+    list->children->pdata[index] = item;
+    item->role = BRIDGE_ROLE_LIST_ITEM;
+    item->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                   BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
+                   BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE);
+    item->window_class = g_strdup(list->window_class);
+    item->position = index + 1;
+    item->set_size = list->set_size;
+    item->placeholder = TRUE;
+    return item;
+}
+
+static struct node *child_at(struct node *node, guint index)
+{
+    if (is_item_list(node))
+        return item_at(node, index);
+    return node->children->pdata[index];
 }
 
 /* ACTIVE and FOCUSED are ours: they change only with focus events. */
@@ -910,6 +992,19 @@ static void update_node(struct node *node, const struct bridge_object *obj)
     for (state = 0; state < 64; state++)
         if (changed & BRIDGE_STATE_BIT(state))
             set_state(node, state, !!(obj->states & BRIDGE_STATE_BIT(state)));
+    /*
+     * Down on a Wine ListBox whose focused item is not selected only
+     * selects that item. Orca presents a selected change only after Space
+     * and ignores a repeated focus (default.py, _on_selected_changed), so
+     * that Down would be silent. Announce the item's name instead: Orca
+     * says nothing for a selected item and "not selected" otherwise, so
+     * the bare name tells that it is selected now.
+     */
+    if (node == focused && node->role == BRIDGE_ROLE_LIST_ITEM &&
+        (changed & obj->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED)) &&
+        last_keysym != XK_SPACE)
+        emit(node, EVENT_OBJECT, "Announcement", "", ATSPI_LIVE_POLITE, 0,
+             g_variant_new_string(obj->name ? obj->name : ""));
     if (g_strcmp0(node->name, obj->name))
     {
         g_free(node->name);
@@ -934,23 +1029,41 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
                              struct node *parent)
 {
     char *id = object_id(obj);
-    struct node *node = g_hash_table_lookup(app->nodes, id);
+    struct node *node;
 
-    if (!node)
+    if (parent && is_item_list(parent) && obj->child)
     {
-        node = node_new(app, id, parent);
+        /* The item may know a newer count than its list. */
+        if (obj->set_size > 0 && obj->set_size != parent->set_size)
+        {
+            parent->set_size = obj->set_size;
+            sync_items(parent);
+        }
+        if (obj->child <= parent->children->len)
+            item_at(parent, obj->child - 1);
+    }
+    node = g_hash_table_lookup(app->nodes, id);
+    if (node && !node->placeholder)
+        update_node(node, obj);
+    else
+    {
+        /* New, or a placeholder filled in quietly: it was there all along. */
+        if (!node)
+            node = node_new(app, id, parent);
+        node->placeholder = FALSE;
         node->role = obj->role;
         node->states = obj->states & ~OWN_STATES;
+        g_free(node->name);
         node->name = g_strdup(obj->name);
         node->value = g_strdup(obj->value);
+        g_free(node->window_class);
         node->window_class = g_strdup(obj->window_class);
         node->position = obj->position;
         node->set_size = obj->set_size;
         if (obj->text)
             set_text(node, obj, FALSE);
     }
-    else
-        update_node(node, obj);
+    sync_items(node);
     g_free(id);
     return node;
 }
@@ -1053,15 +1166,16 @@ static gboolean focus_idle(gpointer data)
 {
     const struct bridge_focus *f = data;
     struct app *app = get_app(f->pid, f->app_name);
-    struct node *frame, *obj;
+    struct node *frame, *parent, *obj;
 
     if (!app)
         return G_SOURCE_REMOVE;
     frame = get_node(app, &f->frame, app->root);
+    parent = f->container.hwnd ? get_node(app, &f->container, frame) : frame;
     if (f->object.hwnd == f->frame.hwnd && f->object.child == f->frame.child)
         obj = frame;
     else
-        obj = get_node(app, &f->object, frame);
+        obj = get_node(app, &f->object, parent);
 
     if (active_frame != frame)
     {
@@ -1171,6 +1285,7 @@ static void free_focus(gpointer data)
 
     g_free((char *)f->app_name);
     free_object(&f->frame);
+    free_object(&f->container);
     free_object(&f->object);
     g_free(f);
 }
@@ -1200,6 +1315,7 @@ void atspi_post_focus(const struct bridge_focus *focus)
     f->pid = focus->pid;
     f->app_name = g_strdup(focus->app_name);
     copy_object(&f->frame, &focus->frame);
+    copy_object(&f->container, &focus->container);
     copy_object(&f->object, &focus->object);
     post(focus_idle, f, free_focus);
 }
@@ -1221,6 +1337,8 @@ static gboolean key_idle(gpointer data)
     const struct bridge_key *k = data;
     GError *error = NULL;
 
+    if (k->pressed)
+        last_keysym = k->keysym;
     if (!key_conn)
     {
         key_conn = g_dbus_connection_new_for_address_sync(

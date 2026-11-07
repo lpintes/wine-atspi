@@ -45,6 +45,7 @@ struct focus_strings
 {
     char app[MAX_PATH * 3];
     char frame[NAME_MAX_UTF8];
+    char container[NAME_MAX_UTF8];
     char object[NAME_MAX_UTF8];
     char value[NAME_MAX_UTF8];
     char frame_class[256 * 3];
@@ -595,6 +596,107 @@ static BOOL is_list_box(const WCHAR *cls)
 }
 
 /*
+ * Role, states and item count of a ListBox or SysListView32 as a whole:
+ * focused without a focused item, or the parent of its items. Orca never
+ * speaks the role of a focused "list" and says nothing for an unnamed
+ * one, and skips a "list" ancestor by default; for a "list box" it says
+ * "n items" from setsize, or the role if the list is empty
+ * (speech_generator.py).
+ */
+static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *obj)
+{
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    DWORD_PTR count = 0;
+
+    obj->role = BRIDGE_ROLE_LIST_BOX;
+    if (listview ? !(style & LVS_SINGLESEL) : (style & (LBS_MULTIPLESEL | LBS_EXTENDEDSEL)) != 0)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_MULTISELECTABLE);
+    if (SendMessageTimeoutW(hwnd, listview ? LVM_GETITEMCOUNT : LB_GETCOUNT, 0, 0,
+                            SMTO_ABORTIFHUNG, 500, &count) && (LONG)count >= 0)
+        obj->set_size = (int)count;
+}
+
+/*
+ * The list window as parent of its focused item, so that Orca presents
+ * the list's label when focus enters it. No MSAA: Wine's oleacc names a
+ * list only by its window text.
+ */
+static void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
+{
+    WCHAR cls[256];
+
+    get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
+    memset(obj, 0, sizeof(*obj));
+    if (!is_list_box(cls) && lstrcmpiW(cls, L"SysListView32"))
+        return;
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->window_class = str->object_class;
+    find_label(hwnd, str->container, sizeof(str->container));
+    obj->name = str->container;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
+    describe_list_box(hwnd, !is_list_box(cls), obj);
+}
+
+/*
+ * Wine's oleacc has only a stub for ListBox too: name and role of an item
+ * fail with E_INVALIDARG (client.c). LB_GETTEXT is marshalled across
+ * processes. An owner-drawn list without LBS_HASSTRINGS keeps no text,
+ * its item is left unnamed. TRUE if obj was filled, FALSE if the list has
+ * no such item, LIST_BUSY if it did not answer.
+ */
+static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
+                                 struct focus_strings *str)
+{
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    DWORD_PTR count = 0, len = 0, sel = 0;
+    WCHAR *text;
+
+    if (!SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+        return LIST_BUSY;
+    if (item < 0 || item >= (LONG)count)
+        return FALSE;
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = item + 1;
+    obj->role = BRIDGE_ROLE_LIST_ITEM;
+    obj->value = NULL;
+    str->object[0] = 0;
+    obj->name = str->object;
+    if (!(style & (LBS_OWNERDRAWFIXED | LBS_OWNERDRAWVARIABLE)) || (style & LBS_HASSTRINGS))
+    {
+        if (!SendMessageTimeoutW(hwnd, LB_GETTEXTLEN, item, 0, SMTO_ABORTIFHUNG, 500, &len))
+            return LIST_BUSY;
+        if ((LONG)len > 0 && (text = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR))))
+        {
+            text[0] = 0;
+            if (SendMessageTimeoutW(hwnd, LB_GETTEXT, item, (LPARAM)text,
+                                    SMTO_ABORTIFHUNG, 500, &len) && (LONG)len >= 0)
+            {
+                text[len] = 0;
+                to_utf8(text, str->object, sizeof(str->object));
+            }
+            HeapFree(GetProcessHeap(), 0, text);
+        }
+    }
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
+    if (SendMessageTimeoutW(hwnd, LB_GETSEL, item, 0, SMTO_ABORTIFHUNG, 500, &sel) &&
+        (LONG)sel > 0)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    obj->position = item + 1;
+    obj->set_size = (int)count;
+    return TRUE;
+}
+
+/*
  * Fills obj from MSAA and the window class; the strings point into str.
  * FALSE if MSAA failed.
  */
@@ -606,7 +708,7 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     BSTR name = NULL;
     LONG msaa_state = 0;
     WCHAR cls[256];
-    BOOL listview;
+    BOOL listview, listbox;
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
     obj->window_class = str->object_class;
@@ -620,6 +722,21 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
 
         if (item >= 0)
             return describe_listview_item(hwnd, item, obj, str);
+    }
+    listbox = id_object == OBJID_CLIENT && is_list_box(cls);
+    if (listbox && id_child > 0)
+    {
+        /*
+         * Wine reports focus_item + 1 even for an empty list
+         * (listbox.c, WM_SETFOCUS); then the list itself is described.
+         */
+        int ret = describe_listbox_item(hwnd, id_child - 1, obj, str);
+
+        if (ret == LIST_BUSY)
+            return FALSE;
+        if (ret)
+            return TRUE;
+        id_child = CHILDID_SELF;
     }
     VariantInit(&child);
     if (FAILED(AccessibleObjectFromEvent(hwnd, id_object, id_child, &acc, &child)) || !acc)
@@ -667,33 +784,8 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     }
     if (!str->object[0] && !obj->child && needs_label(obj->role))
         find_label(hwnd, str->object, sizeof(str->object));
-    if (obj->child && is_list_box(cls))
-    {
-        DWORD_PTR count = 0;
-
-        if (SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) &&
-            (LONG)count > 0)
-        {
-            obj->position = obj->child;
-            obj->set_size = (int)count;
-        }
-    }
-    if (listview)
-    {
-        /*
-         * No focused item, so the list itself is presented. Orca never
-         * speaks the role of a focused "list" and says nothing for an
-         * unnamed one; for a "list box" it says "n items" from setsize,
-         * or the role if the list is empty (speech_generator.py).
-         */
-        DWORD_PTR count = 0;
-
-        obj->role = BRIDGE_ROLE_LIST_BOX;
-        if (!(GetWindowLongW(hwnd, GWL_STYLE) & LVS_SINGLESEL))
-            obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_MULTISELECTABLE);
-        if (SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
-            obj->set_size = (int)count;
-    }
+    if ((listview || listbox) && !obj->child)
+        describe_list_box(hwnd, listview, obj);
 
     SysFreeString(name);
     VariantClear(&role);
@@ -829,6 +921,8 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     if (!describe_object(hwnd, id_object, id_child, &focus.object, &str))
         return;
     describe_frame(top, &focus.frame, &str);
+    if (focus.object.child && id_object == OBJID_CLIENT)
+        describe_container(hwnd, &focus.container, &str);
     GetWindowThreadProcessId(hwnd, &pid);
     focus.pid = pid;
     get_app_name(pid, str.app, sizeof(str.app));

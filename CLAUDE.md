@@ -178,6 +178,14 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   `LVM_GETITEMSTATE`, `LVM_GETITEMCOUNT` and `LVM_GETITEMTEXTW` through
   memory in the target (`get_listview_text`). Orca says "x of y" from
   the attributes `posinset` (from 1) and `setsize` (`ax_utilities.py`).
+- `ListBox` is a stub in `oleacc` too: name and role of an item
+  (child > 0) fail with `E_INVALIDARG`. Items are read with
+  `LB_GETCOUNT`, `LB_GETTEXTLEN`, `LB_GETTEXT` (marshalled by Wine) and
+  `LB_GETSEL` (`describe_listbox_item`). On `WM_SETFOCUS` Wine reports
+  child `focus_item + 1`, which is 1 even for an empty list.
+- A focused list item gets the list window as its AT-SPI parent (role
+  list box, label from `find_label`, `bridge_focus.container`), so Orca
+  says the list's label when focus enters it.
 - After an arrow key in the Open dialog's file list the dialog thread is
   busy for 0.3 to over 0.5 s (WSL, folder on `/mnt/c`), so list view
   queries can time out; the key check retries a busy list.
@@ -206,7 +214,25 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   attribute `setsize`, or the role if there is no count
   (`_generate_list_box`). The bridge reports a list view without a
   focused item as a list box. Speaking "x of y" for items is off by
-  default (`speak-position-in-set`).
+  default (`speech_presenter.py`, `speak-position-in-set`).
+- On a focus change Orca speaks the new ancestors (`_generate_ancestors`
+  in `speech_generator.py`), but skips `list`, `panel`, `table` and
+  other context roles unless enabled in its settings
+  (`_get_enabled_and_disabled_context_roles`); a `list box` ancestor is
+  spoken.
+- For a `list box` Orca says "list with n available items" instead of
+  "n items" when fewer than `setsize` children are sensitive
+  (`_generate_number_of_children`, `get_sensitive_child_count`; above 50
+  children it assumes all are). The bridge therefore gives a list box
+  one child slot per item and fills unknown ones with placeholders
+  (`is_item_list`, `item_at` in `atspi.c`).
+- Orca announces `state-changed:selected` only after Space (or Up/Down
+  in a table cell), and a repeated focus on the same object is ignored
+  (`set_locus_of_focus` without force). So the first Down in a Wine
+  `ListBox`, which only selects the already focused item 0, would be
+  silent. The bridge then emits `object:announcement` (polite) with the
+  item's name, unless the last key was Space (`update_node`); Orca
+  presents an announcement's text (`_on_announcement`).
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it
@@ -280,6 +306,12 @@ Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
 - **Quick tests in WSL** (Wine runs through WSLg). Verify automatically:
   a `python-atspi` script dumps the AT-SPI tree and events and compares them
   with expectations. Do not ask the user to listen to every iteration.
+  Controls missing from Wine's own programs are tested with
+  `tests/controls.c` (window class `WineAtspiControls`) and
+  `tests/bridge-controls.sh`.
+  A test window in WSLg takes the focus on the user's Windows desktop,
+  so keys the user types meanwhile reach the target. Unexpected keys
+  in a test log (seen: W, Left, Down) are such keys, not a bridge bug.
 - **Tests with Orca in the Arch image** `C:\linux\arch.img`. Its build
   scripts and rules are in `C:\Users\pintes\pokus\archfile` (read its
   `CLAUDE.md` before touching the image).

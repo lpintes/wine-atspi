@@ -9,6 +9,11 @@ export WINEDEBUG=${WINEDEBUG:--all}
 LOG=${1:-build/bridge-notepad.log}
 BUILD=build
 
+# The Open dialog starts in the folder last used in it; start in the
+# repository root, whose file list the test expects.
+wine reg delete 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedMRU' \
+    /f > /dev/null 2>&1
+
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
