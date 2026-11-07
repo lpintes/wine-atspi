@@ -1104,11 +1104,13 @@ static char *object_id(const struct bridge_object *obj)
  * are sensitive (speech_generator.py, _generate_number_of_children).
  * Only items that had focus are known; the other slots are NULL until
  * asked for, then filled by placeholders. A table has a slot for each
- * column header and each cell, see cell_index.
+ * column header and each cell, see cell_index. A page tab list has a slot
+ * for each tab.
  */
 static gboolean is_item_list(struct node *node)
 {
-    return node->role == BRIDGE_ROLE_LIST_BOX || node->role == BRIDGE_ROLE_TABLE;
+    return node->role == BRIDGE_ROLE_LIST_BOX || node->role == BRIDGE_ROLE_TABLE ||
+           node->role == BRIDGE_ROLE_PAGE_TAB_LIST;
 }
 
 /* Keeps count slots; the known children beyond them leave, announced. */
@@ -1215,7 +1217,8 @@ static struct node *item_at(struct node *list, guint index)
     }
     item->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
                     BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE);
-    item->role = BRIDGE_ROLE_LIST_ITEM;
+    item->role = list->role == BRIDGE_ROLE_PAGE_TAB_LIST ? BRIDGE_ROLE_PAGE_TAB
+                                                          : BRIDGE_ROLE_LIST_ITEM;
     item->position = index + 1;
     if (list->role == BRIDGE_ROLE_TABLE)
     {

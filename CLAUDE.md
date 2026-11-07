@@ -192,6 +192,12 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   display order from `LVM_GETCOLUMNORDERARRAY`, which fails if its
   count is smaller than the number of columns
   (`HEADER_GetOrderArray`). Both need memory in the target.
+- `SysTabControl32` has no `oleacc` proxy either. Without
+  `TCS_BUTTONS` an arrow key emits only `EVENT_OBJECT_SELECTION`
+  (child item + 1); `EVENT_OBJECT_FOCUS` for a tab comes only with
+  `TCS_BUTTONS` (`comctl32/tab.c`, `TAB_SetCurFocus`). The bridge reads
+  the focused tab with `TCM_GETCURFOCUS`, its text with `TCM_GETITEMW`
+  through memory in the target, and checks it after each key.
 - After an arrow key in the Open dialog's file list the dialog thread is
   busy for 0.3 to over 0.5 s (WSL, folder on `/mnt/c`), so list view
   queries can time out; the key check retries a busy list.
@@ -284,6 +290,11 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   Where Am I. Wine's tree view selects its first item on `WM_SETFOCUS`,
   so focus goes straight to an item. Decided (2026-11-07): left as in
   GTK, no workaround in the bridge.
+- For a focused page tab Orca says name and role only ("General
+  karta"): `_generate_ancestors` returns nothing when the new focus is a
+  page tab, so the page tab list and its label are never spoken, as in
+  GTK. "x of y" again only with `speak-position-in-set`. Confirmed with
+  Orca on `tests/controls.c` (2026-11-07).
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it

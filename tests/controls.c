@@ -13,6 +13,7 @@
  *              rows readme.txt / notes.md / src
  *   "Places:"  SysTreeView32, collapsed: Home (Documents, Music),
  *              Work (Reports), Trash
+ *   "Sections:" SysTabControl32: General, Advanced, About
  *   "Close"    Button
  */
 
@@ -21,7 +22,7 @@
 
 #define CLASS_NAME L"WineAtspiControls"
 
-enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_CLOSE };
+enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_CLOSE };
 
 static HWND add_control(HWND parent, const WCHAR *cls, const WCHAR *text, DWORD style,
                         int x, int y, int w, int h, int id)
@@ -113,6 +114,23 @@ static void add_places(HWND parent, int y)
     add_place(tree, TVI_ROOT, L"Trash");
 }
 
+static void add_sections(HWND parent, int y)
+{
+    static const WCHAR *const sections[] = { L"General", L"Advanced", L"About" };
+    TCITEMW item = { 0 };
+    HWND tabs;
+    int i;
+
+    add_control(parent, L"Static", L"&Sections:", SS_LEFT, 10, y, 100, 20, 0);
+    tabs = add_control(parent, WC_TABCONTROLW, NULL, WS_TABSTOP, 120, y, 300, 60, ID_SECTIONS);
+    item.mask = TCIF_TEXT;
+    for (i = 0; i < ARRAYSIZE(sections); i++)
+    {
+        item.pszText = (WCHAR *)sections[i];
+        SendMessageW(tabs, TCM_INSERTITEMW, i, (LPARAM)&item);
+    }
+}
+
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static const WCHAR *const fruits[] = { L"Apple", L"Banana", L"Cherry", NULL };
@@ -126,8 +144,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         add_list(hwnd, L"&Colors:", LBS_EXTENDEDSEL, 170, ID_COLORS, colors);
         add_files(hwnd, 250);
         add_places(hwnd, 360);
+        add_sections(hwnd, 470);
         add_control(hwnd, L"Button", L"Close", WS_TABSTOP | BS_PUSHBUTTON,
-                    120, 470, 100, 25, ID_CLOSE);
+                    120, 540, 100, 25, ID_CLOSE);
         return 0;
     case WM_SETFOCUS:
         SetFocus(GetDlgItem(hwnd, ID_FRUITS));
@@ -149,7 +168,8 @@ int main(void)
     HWND hwnd;
     MSG msg;
 
-    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES };
+    INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES |
+                                              ICC_TAB_CLASSES };
 
     InitCommonControlsEx(&icc);
     wc.lpfnWndProc = window_proc;
@@ -159,7 +179,7 @@ int main(void)
     wc.lpszClassName = CLASS_NAME;
     RegisterClassW(&wc);
     hwnd = CreateWindowExW(0, CLASS_NAME, L"Controls", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 550, NULL, NULL,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 620, NULL, NULL,
                            wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     while (GetMessageW(&msg, NULL, 0, 0) > 0)

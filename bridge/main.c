@@ -536,6 +536,16 @@ struct lvcolumn32
     int cchTextMax;
 };
 
+/* TCITEMW as a 32-bit (WoW64) process sees it, up to cchTextMax. */
+struct tcitem32
+{
+    UINT mask;
+    DWORD dwState;
+    DWORD dwStateMask;
+    ULONG pszText;
+    int cchTextMax;
+};
+
 /* Room for the structure in front of the text in the target. */
 #define REMOTE_HEADER 128
 /* Text of one list view cell or column header, in WCHARs. */
@@ -774,6 +784,85 @@ static BOOL is_tree_view(const WCHAR *cls)
     return !lstrcmpiW(cls, L"SysTreeView32");
 }
 
+static BOOL is_tab_control(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"SysTabControl32");
+}
+
+/*
+ * The focused tab of a tab control, -1 if none; LIST_BUSY if it did not
+ * answer. Without TCS_BUTTONS it is the selected tab as well.
+ */
+static int tab_focus(HWND hwnd)
+{
+    DWORD_PTR item = (DWORD_PTR)-1;
+
+    if (!SendMessageTimeoutW(hwnd, TCM_GETCURFOCUS, 0, 0, SMTO_ABORTIFHUNG, 500, &item))
+        return LIST_BUSY;
+    return (int)item;
+}
+
+/*
+ * Wine's oleacc has no proxy for SysTabControl32, and arrow keys emit only
+ * EVENT_OBJECT_SELECTION (comctl32/tab.c, TAB_SetCurFocus; a focus event
+ * only with TCS_BUTTONS), so the tab is read with tab control messages.
+ * The MSAA child id is item + 1, as on Windows. FALSE if the text could
+ * not be read.
+ */
+static BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
+                              struct focus_strings *str)
+{
+    BYTE header[REMOTE_HEADER];
+    WCHAR text[CELL_TEXT_MAX];
+    DWORD_PTR selected = (DWORD_PTR)-1, count = 0;
+    struct remote r;
+    BOOL ok;
+
+    if (!remote_open(hwnd, &r))
+        return FALSE;
+    memset(header, 0, sizeof(header));
+    if (r.wow64)
+    {
+        struct tcitem32 *tc = (struct tcitem32 *)header;
+
+        tc->mask = TCIF_TEXT;
+        tc->pszText = (ULONG)(ULONG_PTR)(r.base + REMOTE_HEADER);
+        tc->cchTextMax = CELL_TEXT_MAX;
+    }
+    else
+    {
+        TCITEMW *tc = (TCITEMW *)header;
+
+        tc->mask = TCIF_TEXT;
+        tc->pszText = (WCHAR *)(r.base + REMOTE_HEADER);
+        tc->cchTextMax = CELL_TEXT_MAX;
+    }
+    ok = remote_text(hwnd, &r, TCM_GETITEMW, item, header, text);
+    remote_close(&r);
+    if (!ok)
+        return FALSE;
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = item + 1;
+    obj->role = BRIDGE_ROLE_PAGE_TAB;
+    obj->value = NULL;
+    to_utf8(text, str->object, sizeof(str->object));
+    obj->name = str->object;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
+    if (SendMessageTimeoutW(hwnd, TCM_GETCURSEL, 0, 0, SMTO_ABORTIFHUNG, 500, &selected) &&
+        (int)selected == item)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count);
+    obj->position = item + 1;
+    obj->set_size = (int)count;
+    return TRUE;
+}
+
 /*
  * Role, states and item count of a ListBox or SysListView32 as a whole:
  * focused without a focused item, or the parent of its items. Orca never
@@ -828,7 +917,8 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
     memset(obj, 0, sizeof(*obj));
-    if (!is_list_box(cls) && lstrcmpiW(cls, L"SysListView32") && !is_tree_view(cls))
+    if (!is_list_box(cls) && lstrcmpiW(cls, L"SysListView32") && !is_tree_view(cls) &&
+        !is_tab_control(cls))
         return;
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->window_class = str->object_class;
@@ -841,6 +931,15 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
     if (is_tree_view(cls))
         obj->role = BRIDGE_ROLE_TREE;
+    else if (is_tab_control(cls))
+    {
+        DWORD_PTR count = 0;
+
+        obj->role = BRIDGE_ROLE_PAGE_TAB_LIST;
+        if (SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) &&
+            (LONG)count >= 0)
+            obj->set_size = (int)count;
+    }
     else
         describe_list_box(hwnd, !is_list_box(cls), obj, str);
 }
@@ -1065,6 +1164,15 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
             return FALSE;
         if (item)
             return describe_treeview_item(hwnd, item, obj, str);
+    }
+    if (id_object == OBJID_CLIENT && is_tab_control(cls))
+    {
+        int item = id_child > 0 ? id_child - 1 : tab_focus(hwnd);
+
+        if (item == LIST_BUSY)
+            return FALSE;
+        if (item >= 0)
+            return describe_tab_item(hwnd, item, obj, str);
     }
     listview = id_object == OBJID_CLIENT && !lstrcmpiW(cls, L"SysListView32");
     if (listview)
@@ -1293,7 +1401,8 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 /*
  * Wine's ListBox moves its caret on arrow keys without a focus event
  * (listbox.c, LISTBOX_HandleKeyDown), and SysListView32 and SysTreeView32
- * emit no focus events at all. Reports the new item as focused and returns TRUE.
+ * emit no focus events at all; SysTabControl32 emits only a selection
+ * event, which is not hooked. Reports the new item as focused and returns TRUE.
  * FALSE if hwnd is no list or the caret did not move, LIST_BUSY if the
  * list did not answer.
  */
@@ -1315,9 +1424,9 @@ static int check_list_caret(HWND hwnd)
         on_focus(hwnd, OBJID_CLIENT, tree_child_id(item));
         return TRUE;
     }
-    if (!lstrcmpiW(cls, L"SysListView32"))
+    if (!lstrcmpiW(cls, L"SysListView32") || is_tab_control(cls))
     {
-        caret = listview_focus(hwnd);
+        caret = is_tab_control(cls) ? tab_focus(hwnd) : listview_focus(hwnd);
         if ((LONG)caret == LIST_BUSY)
             return LIST_BUSY;
     }
