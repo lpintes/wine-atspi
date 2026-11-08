@@ -418,6 +418,20 @@ Found with the bridge and Wine's winefile (`build/exp-winefile.sh`,
   `IRawElementProviderSimple` (and a `TextPattern`) and answers
   `WM_GETOBJECT` / `UiaRootObjectId`, then read it from the probe through
   `IUIAutomation`.
+- Application modules as scripts (idea, 2026-11-08). The winefile fix
+  (`winefile_entry_name`) is the first per-application code, hard-wired in
+  C. Like NVDA's app modules, such fixes could live in per-executable
+  scripts that the bridge loads by process name. Proposed language:
+  Lua 5.4, embedded in the Win32 core. It is plain C with no
+  dependencies, so it builds with both winegcc and mingw and keeps the
+  module boundary. Python is closer to NVDA, but embedding CPython in a
+  Winelib process means a large runtime and the msvcrt / libc clash.
+  First step: decide the primitives a script gets (class name, parent,
+  `SendMessage` with a timeout, `LB_GETITEMDATA`-style values, reading
+  target memory, process bitness) and the hooks it overrides (name,
+  role, states, value of an object). Wait until two or three more
+  applications need such fixes, so that the interface comes from real
+  cases.
 
 ## Winelib pitfalls
 
