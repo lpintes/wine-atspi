@@ -17,7 +17,7 @@ wineserver -k; wineserver -w
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
-python3 tests/atspi-events.py 32 > "$LOG" 2>&1 &
+python3 tests/atspi-events.py 36 > "$LOG" 2>&1 &
 events=$!
 sleep 1
 wine $BUILD/controls.exe.so &
@@ -42,6 +42,9 @@ sleep 2
 # Right gives accessible-value 51, Page Up 41, End 100.
 # The "Level:" progress bar follows it without focus: each change gives
 # accessible-value on progress bar 'Level:' (51, 41, 100) with a rect.
+# Tab to "Count:" (Edit with up-down): spin button 'Count:' value=3
+# [1..10 step 1] with text '3'; Up gives accessible-value 4, Up 5, Down 4,
+# each with the new text.
 # Escape closes the window.
 timeout 45 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:down w:500 k:down w:500 \
@@ -51,7 +54,8 @@ timeout 45 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:tab w:500 k:right w:500 k:down w:500 k:down w:500 \
     k:left w:500 k:left w:500 k:down w:500 \
     k:tab w:500 k:right w:500 k:right w:500 k:left w:500 \
-    k:tab w:500 k:right w:500 k:pgup w:500 k:end w:500
+    k:tab w:500 k:right w:500 k:pgup w:500 k:end w:500 \
+    k:tab w:500 k:up w:500 k:up w:500 k:down w:500
 python3 tests/atspi-dump.py controls > $BUILD/dump-running.log 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so k:escape w:1000
 

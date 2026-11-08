@@ -16,6 +16,7 @@
  *   "Sections:" SysTabControl32: General, Advanced, About
  *   "Volume:"  msctls_trackbar32, 0 to 100 at 50, page size 10
  *   "Level:"   msctls_progress32, 0 to 100, follows "Volume:"; no tab stop
+ *   "Count:"   Edit with a msctls_updown32 buddy, 1 to 10 at 3
  *   "Run"      Button: fills "Level:" from 0 to 100 in 20 s
  *   "Close"    Button
  */
@@ -26,7 +27,7 @@
 #define CLASS_NAME L"WineAtspiControls"
 
 enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_VOLUME,
-       ID_LEVEL, ID_RUN, ID_CLOSE };
+       ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE };
 
 /* "Run" fills "Level:" from 0 to 100 in 20 s, as a long task would. */
 #define RUN_STEP 5
@@ -155,6 +156,21 @@ static void add_volume(HWND parent, int y)
     SendMessageW(bar, PBM_SETPOS, 50, 0);
 }
 
+static void add_count(HWND parent, int y)
+{
+    HWND updown;
+
+    add_control(parent, L"Static", L"C&ount:", SS_LEFT, 10, y, 100, 20, 0);
+    add_control(parent, L"Edit", NULL, WS_TABSTOP | WS_BORDER | ES_NUMBER, 120, y, 80, 22,
+                ID_COUNT);
+    /* UDS_AUTOBUDDY takes the Edit created just before as its buddy. */
+    updown = add_control(parent, UPDOWN_CLASSW, NULL,
+                         UDS_AUTOBUDDY | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS,
+                         0, 0, 0, 0, ID_COUNT_SPIN);
+    SendMessageW(updown, UDM_SETRANGE32, 1, 10);
+    SendMessageW(updown, UDM_SETPOS32, 0, 3);
+}
+
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static const WCHAR *const fruits[] = { L"Apple", L"Banana", L"Cherry", NULL };
@@ -170,10 +186,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         add_places(hwnd, 360);
         add_sections(hwnd, 470);
         add_volume(hwnd, 540);
+        add_count(hwnd, 620);
         add_control(hwnd, L"Button", L"Run", WS_TABSTOP | BS_PUSHBUTTON,
-                    120, 620, 100, 25, ID_RUN);
+                    120, 660, 100, 25, ID_RUN);
         add_control(hwnd, L"Button", L"Close", WS_TABSTOP | BS_PUSHBUTTON,
-                    240, 620, 100, 25, ID_CLOSE);
+                    240, 660, 100, 25, ID_CLOSE);
         return 0;
     case WM_TIMER:
     {
@@ -216,7 +233,8 @@ int main(void)
     MSG msg;
 
     INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES |
-                                              ICC_TAB_CLASSES | ICC_BAR_CLASSES };
+                                              ICC_TAB_CLASSES | ICC_BAR_CLASSES |
+                                              ICC_UPDOWN_CLASS };
 
     InitCommonControlsEx(&icc);
     wc.lpfnWndProc = window_proc;
@@ -226,7 +244,7 @@ int main(void)
     wc.lpszClassName = CLASS_NAME;
     RegisterClassW(&wc);
     hwnd = CreateWindowExW(0, CLASS_NAME, L"Controls", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 700, NULL, NULL,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 740, NULL, NULL,
                            wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     while (GetMessageW(&msg, NULL, 0, 0) > 0)

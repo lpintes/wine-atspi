@@ -380,7 +380,7 @@ struct node
     char **headers;
     gint row;
     gint column;
-    /* Value interface of a slider or progress bar, if has_range. */
+    /* Value interface of a slider, progress bar or spin button, if has_range. */
     gboolean has_range;
     gdouble minimum;
     gdouble maximum;
@@ -705,7 +705,7 @@ static GVariant *text_method(struct node *node, const char *method, GVariant *pa
  */
 static const char *const *node_interfaces(struct node *node, guint *count)
 {
-    static const char *ifaces[3];
+    static const char *ifaces[4];
 
     *count = 0;
     ifaces[(*count)++] = IFACE_ACCESSIBLE;
@@ -714,9 +714,10 @@ static const char *const *node_interfaces(struct node *node, guint *count)
         ifaces[(*count)++] = IFACE_APPLICATION;
         return ifaces;
     }
+    /* A spin button has both, as in GTK. */
     if (node->has_range)
         ifaces[(*count)++] = IFACE_VALUE;
-    else if (node->role == BRIDGE_ROLE_TABLE)
+    if (node->role == BRIDGE_ROLE_TABLE)
         ifaces[(*count)++] = IFACE_TABLE;
     else if (node->role == BRIDGE_ROLE_TABLE_CELL)
         ifaces[(*count)++] = IFACE_TABLE_CELL;

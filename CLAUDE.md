@@ -323,6 +323,19 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   `tests/controls.c` "Run" (2026-11-07): 0 %, 55 % after 10 s, 100 %.
   A bar that changes together with a focused slider is not heard: Orca
   interrupts its speech for the slider's value at once.
+- An up-down (`msctls_updown32`) never has focus: it subclasses its
+  buddy `Edit` and handles the buddy's Up and Down keys (Wine: no Page keys)
+  (`comctl32/updown.c`, `UPDOWN_Buddy_SubclassProc`). Those keys change
+  the buddy text through `UPDOWN_DoAction` without a WinEvent; only
+  `UDM_SETPOS` emits `EVENT_OBJECT_VALUECHANGE`. The buddy cannot name
+  its up-down, so the bridge looks for a sibling up-down whose
+  `UDM_GETBUDDY` is the `Edit` (`find_updown`) and reports the pair as
+  one spin button with `Value` and `Text`, as GTK does. `UDM_GETPOS32`
+  works across processes, `UDM_GETRANGE32` needs memory in the target.
+  Orca ignores text and caret events of a spin button after Up / Down /
+  Page keys and speaks its `accessible-value` change instead
+  (`SPIN_BUTTON_VALUE_CHANGE` in `ax_utilities_event.py`); a spin button
+  speaks its text before the value (`_generate_spin_button`).
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it
