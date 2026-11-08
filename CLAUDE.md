@@ -480,6 +480,22 @@ Wine 11.21, 2026-11-08).
   `IRawElementProviderSimple` (and a `TextPattern`) and answers
   `WM_GETOBJECT` / `UiaRootObjectId`, then read it from the probe through
   `IUIAutomation`.
+- Move heuristics into the hook DLL (idea, 2026-11-08). With code in the
+  target, like NVDA's nvdaHelper:
+  - the key check could run right after the control handled the key
+    (`WH_CALLWNDPROCRET` on `WM_KEYDOWN` / `WM_CHAR`) instead of a 50 ms
+    timer with retries for a busy target;
+  - parent notifications show what Wine's WinEvents miss:
+    `LVN_ITEMCHANGED`, `TVN_SELCHANGED`, `TCN_SELCHANGE`,
+    `CBN_SELCHANGE`, `EN_CHANGE`, `WM_HSCROLL` / `WM_VSCROLL`
+    (caret moves still need a look after the key);
+  - list view, tree view and winefile items read without
+    `VirtualAllocEx` / `ReadProcessMemory`, 32-bit layouts or send
+    timeouts.
+
+  Costs: a bug crashes the target, 32-bit targets need their own DLL. Keep
+  the out-of-process path as fallback and for comparison with NVDA on
+  Windows. The off-screen model needs the same DLL.
 - Application modules as scripts (idea, 2026-11-08). The winefile fix
   (`winefile_entry_name`) is the first per-application code, hard-wired in
   C. Like NVDA's app modules, such fixes could live in per-executable
