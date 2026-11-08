@@ -380,6 +380,18 @@ Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
   not tell which end has the caret. `EM_POSFROMCHAR` of the start compared
   with `GetGUIThreadInfo().rcCaret` does, across processes.
 
+Found with the bridge and Wine's explorer (`wine explorer`, 2026-11-08).
+
+- Wine's `explorer.exe` file browser cannot be used from the keyboard at
+  all. Its `ExplorerWClass` frame keeps the focus: the window procedure
+  has no `WM_SETFOCUS` / `WM_ACTIVATE` case that passes focus to the
+  shell view, and the message loop has no `IsDialogMessage`, so Tab and
+  arrows do nothing (`programs/explorer/explorer.c`). The title is the
+  current folder (`SetWindowTextW` on navigation), so Orca says only
+  "Desktop". The shell view would focus its list view on `WM_SETFOCUS`
+  (`shell32/shlview.c`), but nothing sends it one short of a mouse click.
+  Not a bridge bug; the bridge does not work around it.
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
