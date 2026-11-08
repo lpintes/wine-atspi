@@ -408,6 +408,21 @@ Found with the bridge and Wine's winefile (`build/exp-winefile.sh`,
 - A large folder (`Z:\lib64`, 4000 files) keeps winefile busy for
   seconds; the key check then gives up on the busy list.
 
+Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
+2026-11-08).
+
+- Wordpad's document is a `RichEdit20W` (`riched20`). It emits no
+  WinEvent at all; the key check reads it like an `Edit`.
+- A RichEdit 2.0+ ends a paragraph with one `\r` inside: `EM_GETSEL`
+  and `EM_POSFROMCHAR` count it as one character, while `WM_GETTEXT`
+  gives `\r\n` (`GT_USECRLF` in `riched20/editor.c`). The bridge maps
+  the positions with `rich_text_index` before `char_offset`.
+- Wine's `oleacc` has no proxy for RichEdit and names it by its window
+  text, the whole document; the bridge drops that name, else Orca would
+  read the text again after each key.
+- The test prefix has no `App Paths` entry for wordpad, so `wine wordpad`
+  fails; start `C:\Program Files\Windows NT\Accessories\wordpad.exe`.
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls

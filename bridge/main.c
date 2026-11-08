@@ -452,6 +452,20 @@ static int char_offset(const WCHAR *text, int len, int pos)
 }
 
 /*
+ * A RichEdit (2.0 and later) ends a paragraph with one "\r" inside, so its
+ * EM_GETSEL counts the "\r\n" that WM_GETTEXT gives as one character
+ * (riched20/editor.c). Turn such a position into an index into text.
+ */
+static int rich_text_index(const WCHAR *text, int len, int pos)
+{
+    int i = 0;
+
+    for (; pos > 0 && i < len; pos--)
+        i += text[i] == '\r' && i + 1 < len && text[i + 1] == '\n' ? 2 : 1;
+    return i;
+}
+
+/*
  * EM_GETSEL orders start and end, so it does not tell at which end the
  * caret is. Compare the caret rectangle with the position of the start.
  */
@@ -471,10 +485,11 @@ static BOOL caret_at_start(HWND hwnd, DWORD start)
 }
 
 /* Text, caret and selection of an Edit or RichEdit; str->text owns the text. */
-static void describe_edit_text(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
+static void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
+                               struct focus_strings *str)
 {
     DWORD_PTR len = 0;
-    DWORD start = 0, end = 0;
+    DWORD start = 0, end = 0, start_index, end_index;
     WCHAR *buf, *src, *dst;
     int size, i, n;
 
@@ -491,8 +506,10 @@ static void describe_edit_text(HWND hwnd, struct bridge_object *obj, struct focu
     n = len;
     /* Pointer arguments of EM_GETSEL are marshalled like on Windows. */
     SendMessageTimeoutW(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end, SMTO_ABORTIFHUNG, 500, NULL);
-    obj->selection_start = char_offset(buf, n, start);
-    obj->selection_end = char_offset(buf, n, end);
+    start_index = rich ? rich_text_index(buf, n, start) : start;
+    end_index = rich ? rich_text_index(buf, n, end) : end;
+    obj->selection_start = char_offset(buf, n, start_index);
+    obj->selection_end = char_offset(buf, n, end_index);
     obj->caret = start != end && caret_at_start(hwnd, start)
                      ? obj->selection_start : obj->selection_end;
 
@@ -1491,7 +1508,18 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     if (!obj->child && has_edit_text(cls) &&
         (obj->role == BRIDGE_ROLE_TEXT || obj->role == BRIDGE_ROLE_ENTRY ||
          obj->role == BRIDGE_ROLE_PASSWORD_TEXT || obj->role == BRIDGE_ROLE_SPIN_BUTTON))
-        describe_edit_text(hwnd, obj, str);
+    {
+        BOOL rich = lstrcmpiW(cls, L"Edit") != 0;
+
+        /*
+         * Wine's oleacc has no proxy for a RichEdit and names it by its
+         * window text, the whole document. Orca presents every name change
+         * of the focused object, so it would read the text after each key.
+         */
+        if (rich)
+            str->object[0] = 0;
+        describe_edit_text(hwnd, rich, obj, str);
+    }
     if (obj->role == BRIDGE_ROLE_COMBO_BOX)
     {
         /*
