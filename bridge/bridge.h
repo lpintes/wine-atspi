@@ -213,8 +213,8 @@ void atspi_post_focus(const struct bridge_focus *focus);
 void atspi_post_update(unsigned int pid, const struct bridge_object *object);
 
 /*
- * Reports a changed value of an object that need not have focus, e.g. a
- * progress bar. Unlike atspi_post_update, a new object is added below
+ * Reports a changed value or text of an object that need not have focus,
+ * e.g. a progress bar or a status bar. Unlike atspi_post_update, a new object is added below
  * frame first (container and labels are ignored); focus and the active window stay.
  * Copies everything; callable from any thread.
  */

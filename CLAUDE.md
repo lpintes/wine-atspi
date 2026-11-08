@@ -323,6 +323,17 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   `tests/controls.c` "Run" (2026-11-07): 0 %, 55 % after 10 s, 100 %.
   A bar that changes together with a focused slider is not heard: Orca
   interrupts its speech for the slider's value at once.
+- Orca's "present status bar" command (Orca+KP_Enter twice, laptop
+  Orca+/ twice; `where_am_i_presenter.py`) takes the first `status bar`
+  descendant of the focus's frame and speaks its name, role, then its
+  descendants or its whole text (`_generate_status_bar`). Wine's
+  `msctls_statusbar32` emits no WinEvent on `SB_SETTEXTW`
+  (`comctl32/status.c`). `SB_GETPARTS`, `SB_ISSIMPLE` and
+  `SB_GETTEXTLENGTHW` work across processes, `SB_GETTEXTW` needs memory
+  in the target. The bridge reads the status bar on each focus change
+  and after each key and puts it below the frame as one object with the
+  text of all parts joined by spaces, as NVDA does (`report_status_bar`).
+  Confirmed with Orca on regedit (2026-11-08); `tests/bridge-statusbar.sh`.
 - An up-down (`msctls_updown32`) never has focus: it subclasses its
   buddy `Edit` and handles the buddy's Up and Down keys (Wine: no Page keys)
   (`comctl32/updown.c`, `UPDOWN_Buddy_SubclassProc`). Those keys change

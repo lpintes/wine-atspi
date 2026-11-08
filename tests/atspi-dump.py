@@ -17,7 +17,11 @@ def describe(obj):
         extra = obj.get_toolkit_name()
     else:
         extra = (obj.get_attributes() or {}).get("class", "")
-    return "%s [%s] %r" % (obj.get_role_name(), extra, obj.get_name())
+    line = "%s [%s] %r" % (obj.get_role_name(), extra, obj.get_name())
+    if obj.get_role() == Atspi.Role.STATUS_BAR:
+        text = obj.get_text_iface()
+        line += " text=%r" % (Atspi.Text.get_text(text, 0, -1) if text else None)
+    return line
 
 
 def dump(obj, depth):
