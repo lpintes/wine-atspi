@@ -1150,11 +1150,54 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
 }
 
 /*
+ * Wine's winefile draws its tree and file panes as owner-drawn list boxes
+ * without strings (programs/winefile/winefile.c, create_tree_window). The pane's
+ * parent has class WFS_Tree, the process is winefile.exe (another program
+ * with that class would have another layout) and the item data points to an Entry in the
+ * target: three pointers, three ints, then the WIN32_FIND_DATAW whose
+ * cFileName is the text it draws (draw_item). Reads that name into buf.
+ */
+static BOOL winefile_entry_name(HWND hwnd, int item, char *buf, int size)
+{
+    WCHAR cls[32], name[MAX_PATH];
+    char app[32];
+    DWORD_PTR entry = 0;
+    DWORD pid = 0;
+    HANDLE process;
+    BOOL wow64 = FALSE, ok;
+    SIZE_T offset, done = 0;
+
+    if (!GetClassNameW(GetParent(hwnd), cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"WFS_Tree"))
+        return FALSE;
+    GetWindowThreadProcessId(hwnd, &pid);
+    get_app_name(pid, app, sizeof(app));
+    if (lstrcmpiA(app, "winefile"))
+        return FALSE;
+    if (!SendMessageTimeoutW(hwnd, LB_GETITEMDATA, item, 0, SMTO_ABORTIFHUNG, 500, &entry) ||
+        !entry || (LONG_PTR)entry == LB_ERR)
+        return FALSE;
+    if (!(process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)))
+        return FALSE;
+    IsWow64Process(process, &wow64);
+    offset = 3 * (wow64 ? 4 : sizeof(void *)) + 3 * sizeof(int) +
+             offsetof(WIN32_FIND_DATAW, cFileName);
+    ok = ReadProcessMemory(process, (void *)(entry + offset), name, sizeof(name), &done) &&
+         done == sizeof(name);
+    CloseHandle(process);
+    if (!ok)
+        return FALSE;
+    name[MAX_PATH - 1] = 0;
+    to_utf8(name, buf, size);
+    return TRUE;
+}
+
+/*
  * Wine's oleacc has only a stub for ListBox too: name and role of an item
  * fail with E_INVALIDARG (client.c). LB_GETTEXT is marshalled across
- * processes. An owner-drawn list without LBS_HASSTRINGS keeps no text,
- * its item is left unnamed. TRUE if obj was filled, FALSE if the list has
- * no such item, LIST_BUSY if it did not answer.
+ * processes. An owner-drawn list without LBS_HASSTRINGS keeps no text;
+ * its item is left unnamed unless it is a winefile pane. TRUE if obj was
+ * filled, FALSE if the list has no such item, LIST_BUSY if it did not
+ * answer.
  */
 static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
                                  struct focus_strings *str)
@@ -1189,6 +1232,8 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
             HeapFree(GetProcessHeap(), 0, text);
         }
     }
+    else
+        winefile_entry_name(hwnd, item, str->object, sizeof(str->object));
     obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |

@@ -392,6 +392,22 @@ Found with the bridge and Wine's explorer (`wine explorer`, 2026-11-08).
   (`shell32/shlview.c`), but nothing sends it one short of a mouse click.
   Not a bridge bug; the bridge does not work around it.
 
+Found with the bridge and Wine's winefile (`build/exp-winefile.sh`,
+2026-11-08).
+
+- Both panes of `winefile` (folder tree and file list) are `ListBox`es
+  with `LBS_OWNERDRAWFIXED` and no `LBS_HASSTRINGS`, children of a
+  `WFS_Tree` window (`create_tree_window` in
+  `programs/winefile/winefile.c`). Arrow keys move the caret normally, but
+  `LB_GETTEXT` gives nothing, so Orca heard unnamed items. The item data
+  is a pointer to winefile's `Entry` (three pointers, three ints, then a
+  `WIN32_FIND_DATAW`); the bridge reads its `cFileName` with
+  `LB_GETITEMDATA` and `ReadProcessMemory` (`winefile_entry_name`, only in
+  `winefile.exe`). The
+  layout comes from Wine's source; re-check after Wine upgrades.
+- A large folder (`Z:\lib64`, 4000 files) keeps winefile busy for
+  seconds; the key check then gives up on the busy list.
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
