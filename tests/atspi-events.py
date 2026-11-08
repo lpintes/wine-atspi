@@ -44,9 +44,15 @@ def describe(obj):
             text += " %s items" % attrs["setsize"]
         if "level" in attrs:
             text += " level=%s" % attrs["level"]
+        if "keyshortcuts" in attrs:
+            text += " shortcut=%r" % attrs["keyshortcuts"]
         states = obj.get_state_set()
         if states.contains(Atspi.StateType.SELECTED):
             text += " selected"
+        if states.contains(Atspi.StateType.CHECKED):
+            text += " checked"
+        if not states.contains(Atspi.StateType.SENSITIVE):
+            text += " insensitive"
         if states.contains(Atspi.StateType.EXPANDED):
             text += " expanded"
         elif states.contains(Atspi.StateType.COLLAPSED):

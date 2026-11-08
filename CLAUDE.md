@@ -347,6 +347,16 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   label the next control as label children (`describe_labels`,
   `set_labels`). Confirmed with Orca on notepad's save-changes box
   (2026-11-08).
+- Menus: Orca's ancestors stop at a `menu bar`, and at a parent `menu`
+  named like the prior focus if that was an expanded menu
+  (`speech_generator.py`), so GTK3's frame > menu bar > menu "File"
+  (expanded) > menu item "Open" says only "Open" after "File". A
+  submenu entry is a `menu`, not a `menu item`. A menu item speaks name,
+  role, checked (check / radio menu item), expanded, insensitive and the
+  accelerator, from the attribute `keyshortcuts` first
+  (`ax_utilities_action.py`). While focus is in a menu Orca ignores
+  window deactivation (`default.py`). The bridge builds the same tree
+  below the frame (`report_menu_item`).
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it
@@ -423,6 +433,43 @@ Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 - The test prefix has no `App Paths` entry for wordpad, so `wine wordpad`
   fails; start `C:\Program Files\Windows NT\Accessories\wordpad.exe`.
 
+Found with the menu hook (`build/exp-menu/`, `tests/bridge-menu.sh`,
+Wine 11.21, 2026-11-08).
+
+- A global `WH_CALLWNDPROC` hook from a PE DLL built with mingw
+  (`x86_64-w64-mingw32-gcc`, package `mingw-w64-gcc`) loads into every
+  64-bit GUI process of the prefix, also when the Winelib bridge installs
+  it. The DLL must pin itself (`GetModuleHandleExW` with
+  `GET_MODULE_HANDLE_EX_FLAG_PIN`), else Wine frees it after each call
+  and its state is lost. `WM_COPYDATA` to a hidden bridge window by
+  `SendMessageTimeoutW` takes 2-3 ms per record. A 32-bit target would
+  need a 32-bit DLL installed by a 32-bit process; not done.
+- Wine sends the owner `WM_MENUSELECT` for each highlighted item (item id,
+  or position for an item with a submenu; `0xffff` with no menu at the
+  end), `WM_INITMENUPOPUP` (position of the opening item) before a popup
+  opens and `WM_UNINITMENUPOPUP` when it closes, plus
+  `WM_ENTERMENULOOP` / `WM_EXITMENULOOP`. Escape or Left back to the
+  parent item sends no `WM_MENUSELECT` for it (`win32u/menu.c`), so the
+  hook reports the parent item itself. Right on an open menu gives the
+  next bar item and then the first item of its popup at once; the bridge
+  waits 30 ms (`MENU_SETTLE_MS`) and reports the last one.
+- Item states are right in `WM_MENUSELECT`, stale in `WM_INITMENUPOPUP`
+  (the application fixes them while handling it). Item text is raw:
+  `&Otvoriť...\tCtrl+O`.
+- The Edit's context menu (Shift+F10) uses `TPM_NONOTIFY`
+  (`user32/edit.c`): only `WM_MENUSELECT` and `WM_EXITMENULOOP`, and
+  nothing is highlighted until the first arrow key, so it is silent until
+  then.
+- Wine's system menu (Alt+Space, or Left of the first bar item) hangs
+  below a wrapper menu with one empty `MF_SYSMENU` item; its items carry
+  `MF_SYSMENU`. The hook leaves the wrapper level out; the system menu
+  has no name.
+- Alt+letter and Alt+Space post a fake `WM_KEYDOWN` `VK_RETURN`
+  (`menu.c`), seen by `WH_GETMESSAGE` but not by the LL hook.
+- Wine bug: in regedit with focus in its tree view, Alt alone and F10 do
+  not open the menu (`comctl32/treeview.c` eats `WM_SYSKEYDOWN`);
+  Alt+letter works.
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
@@ -471,7 +518,9 @@ Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 ## Environment
 
 - **Build in Arch WSL** (distro `archlinux`), using `winegcc` from the
-  `wine` package. The source lives on the Windows side at
+  `wine` package, and `x86_64-w64-mingw32-gcc` (`mingw-w64-gcc`) for the
+  menu hook DLL `build/wine-atspi-hook.dll`, which must lie next to
+  `wine-atspi.exe`. The source lives on the Windows side at
   `C:\vcs\github.com\lpintes\wine-atspi` (`/mnt/c/vcs/github.com/lpintes/wine-atspi`
   in WSL).
 - **Quick tests in WSL** (Wine runs through WSLg). Verify automatically:

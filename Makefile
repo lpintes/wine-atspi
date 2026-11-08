@@ -11,7 +11,7 @@ WIN32_FLAGS = -mno-cygwin -mconsole
 export WINEPREFIX
 
 all: $(BUILD)/probe.exe.so $(BUILD)/sendkeys.exe.so $(BUILD)/controls.exe.so \
-	$(BUILD)/wine-atspi.exe.so
+	$(BUILD)/wine-atspi.exe.so $(BUILD)/wine-atspi-hook.dll
 
 $(BUILD):
 	mkdir -p $@
@@ -24,12 +24,19 @@ GIO_LIBS := $(shell pkg-config --libs gio-2.0)
 $(BUILD)/atspi.o: bridge/atspi.c bridge/bridge.h | $(BUILD)
 	$(CC) $(CFLAGS) -fPIC $(GIO_CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: bridge/main.c bridge/bridge.h | $(BUILD)
+$(BUILD)/main.o: bridge/main.c bridge/bridge.h bridge/menuhook.h | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -c -o $@ $<
 
 $(BUILD)/wine-atspi.exe.so: $(BUILD)/main.o $(BUILD)/atspi.o
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/wine-atspi.exe $^ $(GIO_LIBS) \
 		-loleacc -lole32 -loleaut32 -lshell32 -lntdll
+
+# Menu hook: a PE DLL (mingw), because Wine loads it into PE targets.
+# 64-bit targets only for now.
+MINGW_CC ?= x86_64-w64-mingw32-gcc
+
+$(BUILD)/wine-atspi-hook.dll: bridge/menuhook.c bridge/menuhook.h | $(BUILD)
+	$(MINGW_CC) -O2 -Wall -shared -static-libgcc -o $@ $< -luser32 -lkernel32
 
 $(BUILD)/probe.exe.so: probe/probe.c | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/probe.exe $< \

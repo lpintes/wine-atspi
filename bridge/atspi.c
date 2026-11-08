@@ -365,6 +365,7 @@ struct node
     char *name;
     char *value;
     char *window_class;
+    char *shortcut;         /* accelerator of a menu item, or NULL */
     /* Text interface; chars is NULL for nodes without one. */
     gunichar *chars;
     glong count;
@@ -419,6 +420,7 @@ static const char *role_name(guint32 role)
     switch (role)
     {
     case BRIDGE_ROLE_CHECK_BOX: return "check box";
+    case BRIDGE_ROLE_CHECK_MENU_ITEM: return "check menu item";
     case BRIDGE_ROLE_COLUMN_HEADER: return "column header";
     case BRIDGE_ROLE_COMBO_BOX: return "combo box";
     case BRIDGE_ROLE_DIALOG: return "dialog";
@@ -439,6 +441,7 @@ static const char *role_name(guint32 role)
     case BRIDGE_ROLE_PROGRESS_BAR: return "progress bar";
     case BRIDGE_ROLE_PUSH_BUTTON: return "push button";
     case BRIDGE_ROLE_RADIO_BUTTON: return "radio button";
+    case BRIDGE_ROLE_RADIO_MENU_ITEM: return "radio menu item";
     case BRIDGE_ROLE_SCROLL_BAR: return "scroll bar";
     case BRIDGE_ROLE_SEPARATOR: return "separator";
     case BRIDGE_ROLE_SLIDER: return "slider";
@@ -989,6 +992,9 @@ static void method_call(GDBusConnection *conn, const char *sender,
         /* Orca takes a combo box value from here (generator.py). */
         if (node->value)
             g_variant_builder_add(&b, "{ss}", "valuetext", node->value);
+        /* Orca's accelerator of a menu item (ax_utilities_action.py). */
+        if (node->shortcut)
+            g_variant_builder_add(&b, "{ss}", "keyshortcuts", node->shortcut);
         /*
          * Orca says "x of y" for an item from these (ax_utilities.py) and
          * "n items" for a focused list from its setsize; it never speaks
@@ -1213,6 +1219,7 @@ static void node_free(struct node *node)
     g_free(node->name);
     g_free(node->value);
     g_free(node->window_class);
+    g_free(node->shortcut);
     g_free(node->chars);
     g_strfreev(node->headers);
     g_free(node);
@@ -1521,6 +1528,11 @@ static void update_node(struct node *node, const struct bridge_object *obj)
         g_free(node->window_class);
         node->window_class = g_strdup(obj->window_class);
     }
+    if (g_strcmp0(node->shortcut, obj->shortcut))
+    {
+        g_free(node->shortcut);
+        node->shortcut = g_strdup(obj->shortcut);
+    }
     for (state = 0; state < 64; state++)
         if (changed & BRIDGE_STATE_BIT(state))
             set_state(node, state, !!(obj->states & BRIDGE_STATE_BIT(state)));
@@ -1601,6 +1613,8 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         node->value = g_strdup(obj->value);
         g_free(node->window_class);
         node->window_class = g_strdup(obj->window_class);
+        g_free(node->shortcut);
+        node->shortcut = g_strdup(obj->shortcut);
         node->position = obj->position;
         node->set_size = obj->set_size;
         node->level = obj->level;
@@ -1741,12 +1755,17 @@ static gboolean focus_idle(gpointer data)
     const struct bridge_focus *f = data;
     struct app *app = get_app(f->pid, f->app_name);
     struct node *frame, *parent, *obj;
+    gint i;
 
     if (!app)
         return G_SOURCE_REMOVE;
     frame = get_node(app, &f->frame, app->root);
     set_labels(app, frame, f);
-    parent = f->container.hwnd ? get_node(app, &f->container, frame) : frame;
+    parent = frame;
+    for (i = 0; i < f->ancestor_count; i++)
+        parent = get_node(app, &f->ancestors[i], parent);
+    if (f->container.hwnd)
+        parent = get_node(app, &f->container, parent);
     if (f->object.hwnd == f->frame.hwnd && f->object.child == f->frame.child)
         obj = frame;
     else
@@ -1865,6 +1884,7 @@ static void free_object(struct bridge_object *obj)
     g_free((char *)obj->name);
     g_free((char *)obj->value);
     g_free((char *)obj->window_class);
+    g_free((char *)obj->shortcut);
     g_free((char *)obj->text);
     g_strfreev((char **)obj->columns);
 }
@@ -1889,6 +1909,9 @@ static void free_focus(gpointer data)
     for (i = 0; i < f->label_count; i++)
         free_object((struct bridge_object *)&f->labels[i]);
     g_free((struct bridge_object *)f->labels);
+    for (i = 0; i < f->ancestor_count; i++)
+        free_object((struct bridge_object *)&f->ancestors[i]);
+    g_free((struct bridge_object *)f->ancestors);
     g_free(f);
 }
 
@@ -1898,6 +1921,7 @@ static void copy_object(struct bridge_object *dst, const struct bridge_object *s
     dst->name = g_strdup(src->name);
     dst->value = g_strdup(src->value);
     dst->window_class = g_strdup(src->window_class);
+    dst->shortcut = g_strdup(src->shortcut);
     dst->text = g_strdup(src->text);
     dst->columns = NULL;
     if (src->column_count > 0)
@@ -1940,6 +1964,16 @@ void atspi_post_focus(const struct bridge_focus *focus)
             copy_object(&labels[i], &focus->labels[i]);
         f->labels = labels;
         f->label_count = focus->label_count;
+    }
+    if (focus->ancestor_count > 0)
+    {
+        struct bridge_object *ancestors = g_new0(struct bridge_object, focus->ancestor_count);
+        gint i;
+
+        for (i = 0; i < focus->ancestor_count; i++)
+            copy_object(&ancestors[i], &focus->ancestors[i]);
+        f->ancestors = ancestors;
+        f->ancestor_count = focus->ancestor_count;
     }
     post(focus_idle, f, free_focus);
 }

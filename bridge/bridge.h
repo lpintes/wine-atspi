@@ -17,6 +17,7 @@
 enum bridge_role
 {
     BRIDGE_ROLE_CHECK_BOX = 7,
+    BRIDGE_ROLE_CHECK_MENU_ITEM = 8,
     BRIDGE_ROLE_COLUMN_HEADER = 10,
     BRIDGE_ROLE_COMBO_BOX = 11,
     BRIDGE_ROLE_DIALOG = 16,
@@ -37,6 +38,7 @@ enum bridge_role
     BRIDGE_ROLE_PROGRESS_BAR = 42,
     BRIDGE_ROLE_PUSH_BUTTON = 43,
     BRIDGE_ROLE_RADIO_BUTTON = 44,
+    BRIDGE_ROLE_RADIO_MENU_ITEM = 45,
     BRIDGE_ROLE_SCROLL_BAR = 48,
     BRIDGE_ROLE_SEPARATOR = 50,
     BRIDGE_ROLE_SLIDER = 51,
@@ -98,6 +100,8 @@ struct bridge_object
     const char *name;           /* may be NULL */
     const char *value;          /* current value, e.g. a combo box text; may be NULL */
     const char *window_class;   /* GetClassName of hwnd, may be NULL */
+    /* Accelerator of a menu item as shown, e.g. "Ctrl+O"; may be NULL. */
+    const char *shortcut;
     /*
      * Content of a text control, NULL for objects without text. Line
      * breaks are "\n". Offsets count characters (code points), as AT-SPI
@@ -156,6 +160,10 @@ struct bridge_object
  * message of a message box (role LABEL); they become children of frame,
  * and the ones of an earlier focus that are not listed any more leave it.
  * Screen readers read them when focus enters a dialog.
+ *
+ * ancestors are the objects between frame and container, outermost
+ * first, e.g. the menu bar and the open menus above a menu item; a known
+ * object stays where it is.
  */
 struct bridge_focus
 {
@@ -166,6 +174,8 @@ struct bridge_focus
     struct bridge_object object;
     int label_count;
     const struct bridge_object *labels;
+    int ancestor_count;
+    const struct bridge_object *ancestors;
 };
 
 /*
