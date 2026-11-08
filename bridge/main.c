@@ -20,6 +20,9 @@
 #define NAME_MAX_UTF8 1024
 /* Columns of a list view in report view beyond this are left out. */
 #define MAX_COLUMNS 16
+/* Texts of a window that name no control, see describe_labels. */
+#define MAX_LABELS 16
+#define LABEL_MAX_UTF8 2048
 
 /* Held by the running bridge: one bridge per prefix. */
 #define BRIDGE_MUTEX L"WineAtspiBridge"
@@ -83,6 +86,8 @@ struct focus_strings
     const char *cell_ptrs[MAX_COLUMNS];
     char headers[MAX_COLUMNS][NAME_MAX_UTF8];
     const char *header_ptrs[MAX_COLUMNS];
+    char labels[MAX_LABELS][LABEL_MAX_UTF8];
+    struct bridge_object label_objects[MAX_LABELS];
     char *text;     /* heap, see free_strings */
 };
 
@@ -562,6 +567,26 @@ static BOOL is_text_static(HWND hwnd)
     return FALSE;
 }
 
+/* Drops the "&" of the mnemonic from the text buf of Static hwnd. */
+static void strip_mnemonic(HWND hwnd, WCHAR *buf)
+{
+    int i, j;
+
+    if (GetWindowLongW(hwnd, GWL_STYLE) & SS_NOPREFIX)
+        return;
+    for (i = j = 0; buf[i]; i++)
+    {
+        if (buf[i] == '&')
+        {
+            if (buf[i + 1] != '&')
+                continue;
+            i++;
+        }
+        buf[j++] = buf[i];
+    }
+    buf[j] = 0;
+}
+
 /*
  * Name of an unnamed control from the Static before it in the dialog, as
  * oleacc does on Windows. Wine's oleacc does this only for a bare Edit,
@@ -574,7 +599,6 @@ static void find_label(HWND hwnd, char *dst, int size)
 {
     WCHAR cls[64], buf[NAME_MAX_UTF8 / 3];
     HWND parent, cur;
-    int i, j;
 
     dst[0] = 0;
     while ((parent = GetParent(hwnd)) && GetClassNameW(parent, cls, ARRAYSIZE(cls)) &&
@@ -599,21 +623,84 @@ static void find_label(HWND hwnd, char *dst, int size)
     }
     if (!cur)
         return;
-    if (!(GetWindowLongW(cur, GWL_STYLE) & SS_NOPREFIX))
-    {
-        for (i = j = 0; buf[i]; i++)
-        {
-            if (buf[i] == '&')
-            {
-                if (buf[i + 1] != '&')
-                    continue;
-                i++;
-            }
-            buf[j++] = buf[i];
-        }
-        buf[j] = 0;
-    }
+    strip_mnemonic(cur, buf);
     to_utf8(buf, dst, size);
+}
+
+/*
+ * A text Static that names the control after it, as find_label sees it:
+ * the nearest visible sibling after it that is not a picture or empty
+ * Static is a control that takes its name from a label.
+ */
+static BOOL is_label_of_control(HWND hwnd)
+{
+    WCHAR cls[64], buf[2];
+    HWND cur;
+
+    for (cur = GetWindow(hwnd, GW_HWNDNEXT); cur; cur = GetWindow(cur, GW_HWNDNEXT))
+    {
+        if (!(GetWindowLongW(cur, GWL_STYLE) & WS_VISIBLE))
+            continue;
+        if (!GetClassNameW(cur, cls, ARRAYSIZE(cls)))
+            return FALSE;
+        if (lstrcmpiW(cls, L"Static"))
+            return needs_label(role_from_class(cur, cls));
+        if (is_text_static(cur) && InternalGetWindowText(cur, buf, ARRAYSIZE(buf)))
+            return FALSE;
+    }
+    return FALSE;
+}
+
+struct label_search
+{
+    struct bridge_focus *focus;
+    struct focus_strings *str;
+};
+
+static BOOL CALLBACK add_label(HWND hwnd, LPARAM param)
+{
+    struct label_search *search = (struct label_search *)param;
+    struct bridge_object *obj;
+    WCHAR cls[64], buf[LABEL_MAX_UTF8 / 3];
+    int n = search->focus->label_count;
+
+    if (n >= MAX_LABELS)
+        return FALSE;
+    if (!IsWindowVisible(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
+        lstrcmpiW(cls, L"Static") || !is_text_static(hwnd))
+        return TRUE;
+    /* No WM_GETTEXT, see find_label. */
+    if (!InternalGetWindowText(hwnd, buf, ARRAYSIZE(buf)) || is_label_of_control(hwnd))
+        return TRUE;
+    strip_mnemonic(hwnd, buf);
+    to_utf8(buf, search->str->labels[n], sizeof(search->str->labels[n]));
+    obj = &search->str->label_objects[n];
+    memset(obj, 0, sizeof(*obj));
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->role = BRIDGE_ROLE_LABEL;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
+    obj->name = search->str->labels[n];
+    obj->window_class = "Static";
+    get_extents(hwnd, obj);
+    search->focus->label_count = n + 1;
+    return TRUE;
+}
+
+/*
+ * The texts of top-level window top that name no control, such as the
+ * message of a message box. Orca reads them when focus enters a dialog
+ * (speech_generator.py, _generate_dialog: unrelated_labels).
+ */
+static void describe_labels(HWND top, struct bridge_focus *focus, struct focus_strings *str)
+{
+    struct label_search search = { focus, str };
+
+    focus->label_count = 0;
+    focus->labels = str->label_objects;
+    EnumChildWindows(top, add_label, (LPARAM)&search);
 }
 
 /* LVITEMW as a 32-bit (WoW64) process sees it, up to cchTextMax. */
@@ -1513,6 +1600,7 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     if (!describe_object(hwnd, id_object, id_child, &focus.object, &str))
         return;
     describe_frame(top, &focus.frame, &str);
+    describe_labels(top, &focus, &str);
     if (focus.object.child && id_object == OBJID_CLIENT)
         describe_container(hwnd, &focus.container, &str);
     GetWindowThreadProcessId(hwnd, &pid);

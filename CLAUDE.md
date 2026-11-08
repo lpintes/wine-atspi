@@ -336,6 +336,17 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   Page keys and speaks its `accessible-value` change instead
   (`SPIN_BUTTON_VALUE_CHANGE` in `ax_utilities_event.py`); a spin button
   speaks its text before the value (`_generate_spin_button`).
+- When focus enters a dialog, Orca speaks the dialog as an ancestor
+  together with its "unrelated labels" (`_generate_dialog` ->
+  `unrelated_labels` in `script_utilities.py`): descendants with role
+  label or static that are showing, not focusable, without relations,
+  of at least 3 words and not part of the dialog name, sorted by
+  position. Wine's message box text is a `Static` (id `0xffff`,
+  `SS_NOPREFIX`) after the buttons (`user32.rc`, `MSGBOX`). The bridge
+  gives each top-level window its visible text `Static`s that do not
+  label the next control as label children (`describe_labels`,
+  `set_labels`). Confirmed with Orca on notepad's save-changes box
+  (2026-11-08).
 - Orca reads text almost only through `Atspi.Text.get_string_at_offset`
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it

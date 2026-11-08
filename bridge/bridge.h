@@ -151,6 +151,11 @@ struct bridge_object
  * of a list or a cell of a table lives in container, the list window
  * (role LIST_BOX, TABLE or TREE); container.hwnd is 0 if
  * object is a direct child of frame.
+ *
+ * labels are the texts shown in frame that name no control, e.g. the
+ * message of a message box (role LABEL); they become children of frame,
+ * and the ones of an earlier focus that are not listed any more leave it.
+ * Screen readers read them when focus enters a dialog.
  */
 struct bridge_focus
 {
@@ -159,6 +164,8 @@ struct bridge_focus
     struct bridge_object frame;
     struct bridge_object container;
     struct bridge_object object;
+    int label_count;
+    const struct bridge_object *labels;
 };
 
 /*
@@ -198,7 +205,7 @@ void atspi_post_update(unsigned int pid, const struct bridge_object *object);
 /*
  * Reports a changed value of an object that need not have focus, e.g. a
  * progress bar. Unlike atspi_post_update, a new object is added below
- * frame first (container is ignored); focus and the active window stay.
+ * frame first (container and labels are ignored); focus and the active window stay.
  * Copies everything; callable from any thread.
  */
 void atspi_post_value(const struct bridge_focus *change);

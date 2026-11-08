@@ -1709,6 +1709,33 @@ fail:
     return NULL;
 }
 
+/*
+ * Makes the labels of f the label children of frame: new ones are added,
+ * known ones updated, and the ones no longer listed removed. Done before
+ * the focus event, so the screen reader finds them under a new dialog.
+ */
+static void set_labels(struct app *app, struct node *frame, const struct bridge_focus *f)
+{
+    GPtrArray *kept = g_ptr_array_new();
+    GPtrArray *gone = g_ptr_array_new();
+    gint i;
+    guint j;
+
+    for (i = 0; i < f->label_count; i++)
+        g_ptr_array_add(kept, get_node(app, &f->labels[i], frame));
+    for (j = 0; j < frame->children->len; j++)
+    {
+        struct node *child = frame->children->pdata[j];
+
+        if (child && child->role == BRIDGE_ROLE_LABEL && !g_ptr_array_find(kept, child, NULL))
+            g_ptr_array_add(gone, child);
+    }
+    for (j = 0; j < gone->len; j++)
+        node_remove(gone->pdata[j]);
+    g_ptr_array_free(gone, TRUE);
+    g_ptr_array_free(kept, TRUE);
+}
+
 static gboolean focus_idle(gpointer data)
 {
     const struct bridge_focus *f = data;
@@ -1718,6 +1745,7 @@ static gboolean focus_idle(gpointer data)
     if (!app)
         return G_SOURCE_REMOVE;
     frame = get_node(app, &f->frame, app->root);
+    set_labels(app, frame, f);
     parent = f->container.hwnd ? get_node(app, &f->container, frame) : frame;
     if (f->object.hwnd == f->frame.hwnd && f->object.child == f->frame.child)
         obj = frame;
@@ -1852,11 +1880,15 @@ static void free_update(gpointer data)
 static void free_focus(gpointer data)
 {
     struct bridge_focus *f = data;
+    gint i;
 
     g_free((char *)f->app_name);
     free_object(&f->frame);
     free_object(&f->container);
     free_object(&f->object);
+    for (i = 0; i < f->label_count; i++)
+        free_object((struct bridge_object *)&f->labels[i]);
+    g_free((struct bridge_object *)f->labels);
     g_free(f);
 }
 
@@ -1899,6 +1931,16 @@ void atspi_post_focus(const struct bridge_focus *focus)
     copy_object(&f->frame, &focus->frame);
     copy_object(&f->container, &focus->container);
     copy_object(&f->object, &focus->object);
+    if (focus->label_count > 0)
+    {
+        struct bridge_object *labels = g_new0(struct bridge_object, focus->label_count);
+        gint i;
+
+        for (i = 0; i < focus->label_count; i++)
+            copy_object(&labels[i], &focus->labels[i]);
+        f->labels = labels;
+        f->label_count = focus->label_count;
+    }
     post(focus_idle, f, free_focus);
 }
 
