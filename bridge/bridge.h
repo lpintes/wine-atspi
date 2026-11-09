@@ -180,6 +180,22 @@ struct bridge_focus
 };
 
 /*
+ * The child windows of top-level window frame, for screen reader review
+ * (object navigation, flat review). objects are in tree order, each
+ * parent before its children and siblings in Z order; parents[i] is the
+ * hwnd of the parent of objects[i]: frame.hwnd or an earlier object.
+ */
+struct bridge_tree
+{
+    unsigned int pid;
+    const char *app_name;
+    struct bridge_object frame;
+    int count;
+    const struct bridge_object *objects;
+    const unsigned long long *parents;
+};
+
+/*
  * One key press or release, in X11 terms, as GTK's atk-bridge reports it
  * to the registry's DeviceEventController.
  */
@@ -220,6 +236,15 @@ void atspi_post_update(unsigned int pid, const struct bridge_object *object);
  * Copies everything; callable from any thread.
  */
 void atspi_post_value(const struct bridge_focus *change);
+
+/*
+ * Reports the window tree of a top-level window. Known objects are
+ * updated (changes announced as by atspi_post_update) and moved below
+ * their parent; objects of an earlier tree of that frame that are not
+ * listed leave it. Other objects below frame (items, menus, the status
+ * bar) stay. Copies everything; callable from any thread.
+ */
+void atspi_post_tree(const struct bridge_tree *tree);
 
 /*
  * Reports a key to the registry, for screen readers that get keys only

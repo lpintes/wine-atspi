@@ -393,6 +393,9 @@ struct node
     gint y;
     gint width;
     gint height;
+    /* Posted by the last window tree of its frame, at tree_index; see tree_idle. */
+    gboolean in_tree;
+    guint tree_index;
 };
 
 struct app
@@ -1742,7 +1745,9 @@ static void set_labels(struct app *app, struct node *frame, const struct bridge_
     {
         struct node *child = frame->children->pdata[j];
 
-        if (child && child->role == BRIDGE_ROLE_LABEL && !g_ptr_array_find(kept, child, NULL))
+        /* The window tree keeps its own labels, see tree_idle. */
+        if (child && child->role == BRIDGE_ROLE_LABEL && !child->in_tree &&
+            !g_ptr_array_find(kept, child, NULL))
             g_ptr_array_add(gone, child);
     }
     for (j = 0; j < gone->len; j++)
@@ -1812,6 +1817,151 @@ static gboolean value_idle(gpointer data)
     if (!known && obj->has_range)
         emit(obj, EVENT_OBJECT, "PropertyChange", "accessible-value", 0, 0,
              g_variant_new_double(obj->current));
+    return G_SOURCE_REMOVE;
+}
+
+/* Adds the ids of the nodes below node that came from a window tree. */
+static void collect_tree_ids(struct node *node, GPtrArray *ids)
+{
+    guint i;
+
+    for (i = 0; i < node->children->len; i++)
+    {
+        struct node *child = node->children->pdata[i];
+
+        if (!child)
+            continue;
+        if (child->in_tree)
+            g_ptr_array_add(ids, g_strdup(child->id));
+        collect_tree_ids(child, ids);
+    }
+}
+
+static gboolean is_ancestor(struct node *ancestor, struct node *node)
+{
+    for (; node; node = node->parent)
+        if (node == ancestor)
+            return TRUE;
+    return FALSE;
+}
+
+/* Moves node below parent, announcing it on both. */
+static void node_move(struct node *node, struct node *parent)
+{
+    struct node *old = node->parent;
+    gint index = index_in_parent(node);
+
+    if (old && index >= 0)
+    {
+        if (is_item_list(old))
+            old->children->pdata[index] = NULL;
+        else
+            g_ptr_array_remove_index(old->children, index);
+        emit(old, EVENT_OBJECT, "ChildrenChanged", "remove", index, 0, node_ref(node));
+    }
+    node->parent = parent;
+    g_ptr_array_add(parent->children, node);
+    emit(parent, EVENT_OBJECT, "ChildrenChanged", "add", parent->children->len - 1, 0,
+         node_ref(node));
+}
+
+static gint compare_tree_index(gconstpointer a, gconstpointer b)
+{
+    const struct node *x = *(struct node *const *)a, *y = *(struct node *const *)b;
+
+    return x->tree_index < y->tree_index ? -1 : x->tree_index > y->tree_index;
+}
+
+/*
+ * Puts the children of parent that came from the window tree first, in
+ * Z order (the tab order of a dialog); the others (labels from a focus,
+ * menus, the status bar) keep their order behind them. No event: a
+ * changed order alone is not announced.
+ */
+static void order_children(struct node *parent)
+{
+    GPtrArray *tree, *rest;
+    guint i;
+
+    if (is_item_list(parent))
+        return;
+    tree = g_ptr_array_new();
+    rest = g_ptr_array_new();
+    for (i = 0; i < parent->children->len; i++)
+    {
+        struct node *child = parent->children->pdata[i];
+
+        g_ptr_array_add(child && child->in_tree ? tree : rest, child);
+    }
+    g_ptr_array_sort(tree, compare_tree_index);
+    for (i = 0; i < parent->children->len; i++)
+        parent->children->pdata[i] =
+            i < tree->len ? tree->pdata[i] : rest->pdata[i - tree->len];
+    g_ptr_array_free(tree, TRUE);
+    g_ptr_array_free(rest, TRUE);
+}
+
+static gboolean tree_idle(gpointer data)
+{
+    const struct bridge_tree *t = data;
+    struct app *app = get_app(t->pid, t->app_name);
+    struct node *frame, *parent, *node;
+    GPtrArray *old, *nodes;
+    char *id;
+    gint i;
+    guint j;
+
+    if (!app)
+        return G_SOURCE_REMOVE;
+    frame = get_node(app, &t->frame, app->root);
+    /* Ids, not nodes: removing one node may free others as its subtree. */
+    old = g_ptr_array_new_with_free_func(g_free);
+    collect_tree_ids(frame, old);
+    for (j = 0; j < old->len; j++)
+        ((struct node *)g_hash_table_lookup(app->nodes, old->pdata[j]))->in_tree = FALSE;
+
+    nodes = g_ptr_array_new();
+    for (i = 0; i < t->count; i++)
+    {
+        const struct bridge_object *obj = &t->objects[i];
+
+        parent = frame;
+        if (t->parents[i] != t->frame.hwnd)
+        {
+            struct bridge_object window = { 0 };
+
+            window.hwnd = t->parents[i];
+            id = object_id(&window);
+            parent = g_hash_table_lookup(app->nodes, id);
+            g_free(id);
+            if (!parent || !parent->in_tree)
+                parent = frame;
+        }
+        id = object_id(obj);
+        node = g_hash_table_lookup(app->nodes, id);
+        g_free(id);
+        if (node == frame || (node && is_ancestor(node, parent)))
+            continue;
+        if (node && node->parent != parent)
+            node_move(node, parent);
+        node = get_node(app, obj, parent);
+        node->in_tree = TRUE;
+        node->tree_index = i;
+        g_ptr_array_add(nodes, node);
+    }
+
+    /* Tree nodes have tree nodes or the frame as parents, so none is freed here. */
+    for (j = 0; j < old->len; j++)
+    {
+        node = g_hash_table_lookup(app->nodes, old->pdata[j]);
+        if (node && !node->in_tree)
+            node_remove(node);
+    }
+    order_children(frame);
+    for (j = 0; j < nodes->len; j++)
+        order_children(nodes->pdata[j]);
+    g_ptr_array_free(nodes, TRUE);
+    g_ptr_array_free(old, TRUE);
     return G_SOURCE_REMOVE;
 }
 
@@ -1997,6 +2147,38 @@ void atspi_post_value(const struct bridge_focus *change)
     copy_object(&c->frame, &change->frame);
     copy_object(&c->object, &change->object);
     post(value_idle, c, free_focus);
+}
+
+static void free_tree(gpointer data)
+{
+    struct bridge_tree *t = data;
+    gint i;
+
+    g_free((char *)t->app_name);
+    free_object(&t->frame);
+    for (i = 0; i < t->count; i++)
+        free_object((struct bridge_object *)&t->objects[i]);
+    g_free((struct bridge_object *)t->objects);
+    g_free((unsigned long long *)t->parents);
+    g_free(t);
+}
+
+void atspi_post_tree(const struct bridge_tree *tree)
+{
+    struct bridge_tree *t = g_new0(struct bridge_tree, 1);
+    struct bridge_object *objects;
+    gint i;
+
+    t->pid = tree->pid;
+    t->app_name = g_strdup(tree->app_name);
+    copy_object(&t->frame, &tree->frame);
+    t->count = MAX(tree->count, 0);
+    objects = g_new0(struct bridge_object, t->count);
+    for (i = 0; i < t->count; i++)
+        copy_object(&objects[i], &tree->objects[i]);
+    t->objects = objects;
+    t->parents = g_memdup2(tree->parents, t->count * sizeof(*tree->parents));
+    post(tree_idle, t, free_tree);
 }
 
 /* Connection for key reports; not tied to any application. */

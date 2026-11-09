@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Dump the AT-SPI desktop: one line per application, then its subtree.
 
-Usage: tests/atspi-dump.py [APP_NAME_SUBSTRING]
+Usage: tests/atspi-dump.py [-v] [APP_NAME_SUBSTRING]
 Without an argument all applications are listed without subtrees.
+With -v each object also shows its rect in window coordinates, as Orca's
+flat review asks for it, and its showing and focused states.
 """
 import sys
 
@@ -10,6 +12,21 @@ import gi
 
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
+
+VERBOSE = False
+
+
+def details(obj):
+    parts = []
+    if obj.get_component_iface() is not None:
+        r = Atspi.Component.get_extents(obj, Atspi.CoordType.WINDOW)
+        parts.append("rect=%d,%d %dx%d" % (r.x, r.y, r.width, r.height))
+    states = obj.get_state_set()
+    for state, label in ((Atspi.StateType.SHOWING, "showing"),
+                         (Atspi.StateType.FOCUSED, "focused")):
+        if states.contains(state):
+            parts.append(label)
+    return " " + " ".join(parts) if parts else ""
 
 
 def describe(obj):
@@ -21,6 +38,8 @@ def describe(obj):
     if obj.get_role() in (Atspi.Role.STATUS_BAR, Atspi.Role.TERMINAL):
         text = obj.get_text_iface()
         line += " text=%r" % (Atspi.Text.get_text(text, 0, -1) if text else None)
+    if VERBOSE and obj.get_role() != Atspi.Role.APPLICATION:
+        line += details(obj)
     return line
 
 
@@ -33,7 +52,12 @@ def dump(obj, depth):
 
 
 def main():
-    pattern = sys.argv[1] if len(sys.argv) > 1 else None
+    global VERBOSE
+    args = sys.argv[1:]
+    if args and args[0] == "-v":
+        VERBOSE = True
+        args = args[1:]
+    pattern = args[0] if args else None
     desktop = Atspi.get_desktop(0)
     for i in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(i)

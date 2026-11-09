@@ -256,6 +256,7 @@ static unsigned int role_from_class(HWND hwnd, const WCHAR *cls)
         { L"RICHEDIT50W", BRIDGE_ROLE_TEXT },
         { L"RichEdit20A", BRIDGE_ROLE_TEXT },
         { L"RichEdit20W", BRIDGE_ROLE_TEXT },
+        { L"ScrollBar", BRIDGE_ROLE_SCROLL_BAR },
         { L"Static", BRIDGE_ROLE_LABEL },
         { L"SysListView32", BRIDGE_ROLE_LIST },
         { L"SysTabControl32", BRIDGE_ROLE_PAGE_TAB_LIST },
@@ -685,24 +686,22 @@ struct label_search
     struct focus_strings *str;
 };
 
-static BOOL CALLBACK add_label(HWND hwnd, LPARAM param)
+/*
+ * Describes hwnd as a label if it is a visible text Static that names no
+ * control; its text goes to dst. FALSE for any other window.
+ */
+static BOOL describe_label(HWND hwnd, char *dst, int size, struct bridge_object *obj)
 {
-    struct label_search *search = (struct label_search *)param;
-    struct bridge_object *obj;
     WCHAR cls[64], buf[LABEL_MAX_UTF8 / 3];
-    int n = search->focus->label_count;
 
-    if (n >= MAX_LABELS)
-        return FALSE;
     if (!IsWindowVisible(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
         lstrcmpiW(cls, L"Static") || !is_text_static(hwnd))
-        return TRUE;
+        return FALSE;
     /* No WM_GETTEXT, see find_label. */
     if (!InternalGetWindowText(hwnd, buf, ARRAYSIZE(buf)) || is_label_of_control(hwnd))
-        return TRUE;
+        return FALSE;
     strip_mnemonic(hwnd, buf);
-    to_utf8(buf, search->str->labels[n], sizeof(search->str->labels[n]));
-    obj = &search->str->label_objects[n];
+    to_utf8(buf, dst, size);
     memset(obj, 0, sizeof(*obj));
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->role = BRIDGE_ROLE_LABEL;
@@ -710,10 +709,22 @@ static BOOL CALLBACK add_label(HWND hwnd, LPARAM param)
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
-    obj->name = search->str->labels[n];
+    obj->name = dst;
     obj->window_class = "Static";
     get_extents(hwnd, obj);
-    search->focus->label_count = n + 1;
+    return TRUE;
+}
+
+static BOOL CALLBACK add_label(HWND hwnd, LPARAM param)
+{
+    struct label_search *search = (struct label_search *)param;
+    int n = search->focus->label_count;
+
+    if (n >= MAX_LABELS)
+        return FALSE;
+    if (describe_label(hwnd, search->str->labels[n], sizeof(search->str->labels[n]),
+                       &search->str->label_objects[n]))
+        search->focus->label_count = n + 1;
     return TRUE;
 }
 
@@ -1915,6 +1926,211 @@ static void report_status_bar(HWND top)
 }
 
 /*
+ * The window tree of the foreground top-level window, for Orca's object
+ * navigation and flat review: every visible child window, described by
+ * the same handlers as a focus. It is reported when focus enters another
+ * top-level window, before that focus, and again TREE_REFRESH_MS after
+ * the last show, hide, move or name change in it.
+ */
+#define MAX_TREE 512
+#define TREE_REFRESH_MS 150
+
+enum tree_kind
+{
+    TREE_SKIP,      /* neither the window nor its children */
+    TREE_LEAF,      /* the window, but not its children */
+    TREE_NODE,      /* the window and its children */
+};
+
+struct tree_build
+{
+    struct bridge_object *objects;
+    unsigned long long *parents;
+    int count;
+    struct focus_strings *str;
+};
+
+static HWND tree_top;
+static UINT_PTR tree_timer;
+
+static enum tree_kind tree_kind(HWND hwnd, const WCHAR *cls)
+{
+    DWORD_PTR buddy = 0;
+    WCHAR buddy_cls[16];
+    unsigned int role;
+
+    /* report_status_bar owns the status bar. */
+    if (!lstrcmpiW(cls, L"msctls_statusbar32"))
+        return TREE_SKIP;
+    /* An up-down is part of its buddy's spin button, see find_updown. */
+    if (!lstrcmpiW(cls, L"msctls_updown32") &&
+        SendMessageTimeoutW(hwnd, UDM_GETBUDDY, 0, 0, SMTO_ABORTIFHUNG, 100, &buddy) &&
+        buddy && GetClassNameW((HWND)buddy, buddy_cls, ARRAYSIZE(buddy_cls)) &&
+        !lstrcmpiW(buddy_cls, L"Edit"))
+        return TREE_SKIP;
+    /* The size grip in a window corner, e.g. of the Open dialog. */
+    if (!lstrcmpiW(cls, L"ScrollBar") &&
+        (GetWindowLongW(hwnd, GWL_STYLE) & (SBS_SIZEGRIP | SBS_SIZEBOX)))
+        return TREE_SKIP;
+    role = role_from_class(hwnd, cls);
+    /*
+     * The windows inside a known control are its parts (the Edit and list
+     * of a combo box, the header of a list view); a toolbar can hold real
+     * controls, e.g. wordpad's font combo boxes.
+     */
+    if (role != BRIDGE_ROLE_UNKNOWN && role != BRIDGE_ROLE_TOOL_BAR)
+        return TREE_LEAF;
+    return TREE_NODE;
+}
+
+/* Describes child window hwnd of a window tree; FALSE to leave it out. */
+static BOOL describe_tree_window(HWND hwnd, const WCHAR *cls, struct bridge_object *obj,
+                                 struct focus_strings *str)
+{
+    memset(obj, 0, sizeof(*obj));
+    if (!lstrcmpiW(cls, L"Static"))
+        return describe_label(hwnd, str->object, sizeof(str->object), obj);
+    if (is_list_box(cls) || !lstrcmpiW(cls, L"SysListView32") || is_tree_view(cls) ||
+        is_tab_control(cls))
+    {
+        describe_container(hwnd, obj, str);
+        return obj->hwnd != 0;
+    }
+    if (!describe_object(hwnd, OBJID_CLIENT, CHILDID_SELF, obj, str) || obj->child)
+        return FALSE;
+    /* A child dialog, e.g. a property sheet page, only groups controls. */
+    if (obj->role == BRIDGE_ROLE_DIALOG || obj->role == BRIDGE_ROLE_FRAME ||
+        obj->role == BRIDGE_ROLE_WINDOW || !lstrcmpW(cls, L"#32770"))
+        obj->role = BRIDGE_ROLE_PANEL;
+    return TRUE;
+}
+
+static char *dup_utf8(const char *s)
+{
+    char *d;
+
+    if (!s || !(d = HeapAlloc(GetProcessHeap(), 0, lstrlenA(s) + 1)))
+        return NULL;
+    lstrcpyA(d, s);
+    return d;
+}
+
+/* Copies the strings of obj, which point into a reused focus_strings. */
+static void keep_strings(struct bridge_object *obj)
+{
+    const char **columns = NULL;
+    int i;
+
+    obj->name = dup_utf8(obj->name);
+    obj->value = dup_utf8(obj->value);
+    obj->window_class = dup_utf8(obj->window_class);
+    obj->shortcut = dup_utf8(obj->shortcut);
+    obj->text = dup_utf8(obj->text);
+    if (obj->column_count > 0 &&
+        (columns = HeapAlloc(GetProcessHeap(), 0, obj->column_count * sizeof(*columns))))
+        for (i = 0; i < obj->column_count; i++)
+            columns[i] = dup_utf8(obj->columns[i]);
+    else
+        obj->column_count = 0;
+    obj->columns = columns;
+}
+
+static void free_kept_strings(struct bridge_object *obj)
+{
+    HANDLE heap = GetProcessHeap();
+    int i;
+
+    HeapFree(heap, 0, (char *)obj->name);
+    HeapFree(heap, 0, (char *)obj->value);
+    HeapFree(heap, 0, (char *)obj->window_class);
+    HeapFree(heap, 0, (char *)obj->shortcut);
+    HeapFree(heap, 0, (char *)obj->text);
+    for (i = 0; i < obj->column_count; i++)
+        HeapFree(heap, 0, (char *)obj->columns[i]);
+    HeapFree(heap, 0, (void *)obj->columns);
+}
+
+static void add_tree_children(struct tree_build *b, HWND parent)
+{
+    WCHAR cls[256];
+    HWND hwnd;
+
+    for (hwnd = GetWindow(parent, GW_CHILD); hwnd && b->count < MAX_TREE;
+         hwnd = GetWindow(hwnd, GW_HWNDNEXT))
+    {
+        struct bridge_object *obj = &b->objects[b->count];
+        enum tree_kind kind;
+
+        if (!IsWindowVisible(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
+            (kind = tree_kind(hwnd, cls)) == TREE_SKIP)
+            continue;
+        /* A window that did not answer is left out with its children. */
+        if (!describe_tree_window(hwnd, cls, obj, b->str))
+        {
+            free_strings(b->str);
+            continue;
+        }
+        keep_strings(obj);
+        free_strings(b->str);
+        b->parents[b->count++] = (ULONG_PTR)parent;
+        if (kind == TREE_NODE)
+            add_tree_children(b, hwnd);
+    }
+}
+
+static void report_tree(HWND top)
+{
+    HANDLE heap = GetProcessHeap();
+    struct bridge_tree tree;
+    struct tree_build b;
+    DWORD start = GetTickCount(), pid = 0;
+    int i;
+
+    if (!top || is_console(top))
+        return;
+    b.objects = HeapAlloc(heap, HEAP_ZERO_MEMORY, MAX_TREE * sizeof(*b.objects));
+    b.parents = HeapAlloc(heap, 0, MAX_TREE * sizeof(*b.parents));
+    b.str = HeapAlloc(heap, HEAP_ZERO_MEMORY, sizeof(*b.str));
+    b.count = 0;
+    if (b.objects && b.parents && b.str)
+    {
+        add_tree_children(&b, top);
+        memset(&tree, 0, sizeof(tree));
+        describe_frame(top, &tree.frame, b.str);
+        GetWindowThreadProcessId(top, &pid);
+        tree.pid = pid;
+        get_app_name(pid, b.str->app, sizeof(b.str->app));
+        tree.app_name = b.str->app;
+        tree.count = b.count;
+        tree.objects = b.objects;
+        tree.parents = b.parents;
+        atspi_post_tree(&tree);
+        trace(L"tree: %p %d objects in %lu ms", top, b.count, GetTickCount() - start);
+        for (i = 0; i < b.count; i++)
+            free_kept_strings(&b.objects[i]);
+    }
+    HeapFree(heap, 0, b.str);
+    HeapFree(heap, 0, b.parents);
+    HeapFree(heap, 0, b.objects);
+}
+
+static void CALLBACK refresh_tree(HWND unused, UINT msg, UINT_PTR id, DWORD time)
+{
+    KillTimer(NULL, id);
+    tree_timer = 0;
+    if (tree_top && IsWindow(tree_top))
+        report_tree(tree_top);
+}
+
+/* Something changed in window hwnd: refresh the tree if hwnd is in it. */
+static void schedule_tree(HWND hwnd)
+{
+    if (!tree_top || (hwnd != tree_top && !IsChild(tree_top, hwnd)))
+        return;
+    tree_timer = SetTimer(NULL, tree_timer, TREE_REFRESH_MS, refresh_tree);
+}
+
+/*
  * Wine notifies focus on a window before sending it WM_SETFOCUS, whose
  * handler often passes focus on to a child (win32u/input.c,
  * set_focus_window). The out-of-context event for the parent can then
@@ -2058,8 +2274,14 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     get_app_name(pid, str.app, sizeof(str.app));
     focus.app_name = str.app;
     watch_process(pid);
+    /* Before the focus, so that the focused object gets its tree parent. */
+    if (top != tree_top)
+    {
+        tree_top = top;
+        report_tree(top);
+    }
     atspi_post_focus(&focus);
-    trace(L"focus: %p %ld %ld name \"%S\"", hwnd, id_object, id_child, focus.object.name);
+    trace(L"focus:%p %ld %ld name \"%S\"", hwnd, id_object, id_child, focus.object.name);
     free_strings(&str);
     report_status_bar(top);
 
@@ -2747,7 +2969,17 @@ static void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
             /* Shown again, it is reported again. */
             if (hwnd == last_status.hwnd)
                 last_status.hwnd = NULL;
+            if (hwnd == tree_top)
+                tree_top = NULL;
+            else if (event == EVENT_OBJECT_HIDE)
+                schedule_tree(hwnd);
         }
+        break;
+    case EVENT_OBJECT_SHOW:
+    case EVENT_OBJECT_LOCATIONCHANGE:
+    case EVENT_OBJECT_NAMECHANGE:
+        if (id_object == OBJID_WINDOW && id_child == CHILDID_SELF)
+            schedule_tree(hwnd);
         break;
     }
 }
@@ -2816,7 +3048,8 @@ static int run_bridge(BOOL service)
                                       WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     if (!foreground_hook)
         return 1;
-    value_hook = SetWinEventHook(EVENT_OBJECT_VALUECHANGE, EVENT_OBJECT_VALUECHANGE, NULL,
+    /* LOCATIONCHANGE .. VALUECHANGE includes NAMECHANGE, for the window tree. */
+    value_hook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_VALUECHANGE, NULL,
                                  win_event_proc, 0, 0,
                                  WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     if (!value_hook)
