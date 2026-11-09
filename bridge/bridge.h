@@ -206,6 +206,7 @@ struct bridge_tree
     int count;
     const struct bridge_object *objects;
     const unsigned long long *parents;
+    int no_items;               /* items left out: keep those known below their control */
 };
 
 /*

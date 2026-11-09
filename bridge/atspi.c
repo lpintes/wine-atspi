@@ -2243,12 +2243,18 @@ static gboolean tree_idle(gpointer data)
     /*
      * Tree nodes have tree nodes or the frame as parents, so none is freed
      * here. An item scrolled away leaves too, but not the focused one: the
-     * focus stays where it is.
+     * focus stays where it is. A tree without items keeps the items of a
+     * control that stays (items have the hwnd of their control).
      */
     for (j = 0; j < old->len; j++)
     {
         node = g_hash_table_lookup(app->nodes, old->pdata[j]);
-        if (node && !node->in_tree && node != focused)
+        if (!node || node->in_tree || node == focused)
+            continue;
+        if (t->no_items && node->parent && node->parent != frame && node->parent->in_tree &&
+            node->hwnd == node->parent->hwnd)
+            node->in_tree = TRUE;
+        else
             node_remove(node);
     }
     order_children(frame);
@@ -2484,6 +2490,7 @@ void atspi_post_tree(const struct bridge_tree *tree)
         copy_object(&objects[i], &tree->objects[i]);
     t->objects = objects;
     t->parents = g_memdup2(tree->parents, t->count * sizeof(*tree->parents));
+    t->no_items = tree->no_items;
     post(tree_idle, t, free_tree);
 }
 
