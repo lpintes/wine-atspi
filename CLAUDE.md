@@ -579,6 +579,14 @@ XTest keys, Wine 11.21, 2026-11-09).
   bridge bug. Recovery over ssh: ask the window manager to activate
   another window (`_NET_ACTIVE_WINDOW`, e.g. GdkX11
   `X11Window.foreign_new_for_display(...).focus(0)`).
+- Cause, a marco bug: Wine's toplevels take focus only through
+  `WM_TAKE_FOCUS` (input hint False). When notepad is unmanaged,
+  `focus_ancestor_or_top_window` passes `NULL` instead of `not_this_one`
+  to `meta_stack_get_default_focus_window` (`src/core/workspace.c`, since
+  marco f96255be), picks the dying window and sends it `WM_TAKE_FOCUS`.
+  metacity and mutter pass `not_this_one`. A marco 1.29.0 build with that
+  change fixes it (automatic test and Orca by hand). Reported as
+  mate-desktop/marco#847, fix in PR #848 (2026-11-09); related #703.
 
 ## Open questions (to verify by experiment)
 
