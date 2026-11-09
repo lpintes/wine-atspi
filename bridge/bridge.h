@@ -197,6 +197,11 @@ struct bridge_focus
  * hwnd of the parent of objects[i]: frame.hwnd or an earlier object.
  * The items shown by a list, tree or tab control (child non-zero) follow
  * it, with its hwnd as parent.
+ *
+ * With control set, objects are only the items of that control, which
+ * is already in the tree: they replace its items, the rest of the tree
+ * stays. A key in a list scrolls it or expands an item without an event,
+ * and reading the whole tree again takes far longer.
  */
 struct bridge_tree
 {
@@ -207,6 +212,7 @@ struct bridge_tree
     const struct bridge_object *objects;
     const unsigned long long *parents;
     int no_items;               /* items left out: keep those known below their control */
+    unsigned long long control; /* non-zero: only the items of this control */
 };
 
 /*

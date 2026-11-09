@@ -2195,7 +2195,7 @@ static gboolean tree_idle(gpointer data)
 {
     const struct bridge_tree *t = data;
     struct app *app = get_app(t->pid, t->app_name);
-    struct node *frame, *parent, *node;
+    struct node *frame, *root, *parent, *node;
     GPtrArray *old, *nodes;
     char *id;
     gint i;
@@ -2203,10 +2203,22 @@ static gboolean tree_idle(gpointer data)
 
     if (!app)
         return G_SOURCE_REMOVE;
-    frame = get_node(app, &t->frame, app->root);
+    frame = root = get_node(app, &t->frame, app->root);
+    /* Only the items of one control: its node is the root of the update. */
+    if (t->control)
+    {
+        struct bridge_object window = { 0 };
+
+        window.hwnd = t->control;
+        id = object_id(&window);
+        root = g_hash_table_lookup(app->nodes, id);
+        g_free(id);
+        if (!root || !root->in_tree || !is_ancestor(frame, root))
+            return G_SOURCE_REMOVE;
+    }
     /* Ids, not nodes: removing one node may free others as its subtree. */
     old = g_ptr_array_new_with_free_func(g_free);
-    collect_tree_ids(frame, old);
+    collect_tree_ids(root, old);
     for (j = 0; j < old->len; j++)
         ((struct node *)g_hash_table_lookup(app->nodes, old->pdata[j]))->in_tree = FALSE;
 
@@ -2257,7 +2269,7 @@ static gboolean tree_idle(gpointer data)
         else
             node_remove(node);
     }
-    order_children(frame);
+    order_children(root);
     for (j = 0; j < nodes->len; j++)
         order_children(nodes->pdata[j]);
     g_ptr_array_free(nodes, TRUE);
@@ -2491,6 +2503,7 @@ void atspi_post_tree(const struct bridge_tree *tree)
     t->objects = objects;
     t->parents = g_memdup2(tree->parents, t->count * sizeof(*tree->parents));
     t->no_items = tree->no_items;
+    t->control = tree->control;
     post(tree_idle, t, free_tree);
 }
 

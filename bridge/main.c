@@ -1064,14 +1064,15 @@ static void remote_close(struct remote *r)
 static BOOL remote_text(HWND hwnd, struct remote *r, UINT msg, WPARAM wparam,
                         const BYTE *header, WCHAR *buf)
 {
-    static const WCHAR empty = 0;
+    BYTE block[REMOTE_HEADER + sizeof(WCHAR)];
     DWORD_PTR ret;
     SIZE_T done;
 
     buf[0] = 0;
-    /* Clear the text, a control may leave an empty one unwritten. */
-    if (!WriteProcessMemory(r->process, r->base, header, REMOTE_HEADER, &done) ||
-        !WriteProcessMemory(r->process, r->base + REMOTE_HEADER, &empty, sizeof(empty), &done) ||
+    /* Clear the text too, a control may leave an empty one unwritten. */
+    memcpy(block, header, REMOTE_HEADER);
+    memset(block + REMOTE_HEADER, 0, sizeof(WCHAR));
+    if (!WriteProcessMemory(r->process, r->base, block, sizeof(block), &done) ||
         !SendMessageTimeoutW(hwnd, msg, wparam, (LPARAM)r->base, SMTO_ABORTIFHUNG, 500, &ret) ||
         !ReadProcessMemory(r->process, r->base + REMOTE_HEADER, buf,
                            CELL_TEXT_MAX * sizeof(WCHAR), &done))
@@ -1197,21 +1198,84 @@ static int listview_focus(HWND hwnd)
 }
 
 /*
+ * What all items of a list view share. The window tree describes many
+ * rows of one list, and each message to the target is a round trip.
+ */
+struct listview_info
+{
+    int columns;            /* from listview_columns */
+    int order[MAX_COLUMNS];
+    DWORD_PTR count;        /* items */
+    /*
+     * Cell x and width of each column from the first row described: in
+     * report view all rows have the same columns, so a later row asks
+     * only for its own top and height.
+     */
+    BOOL have_cells;
+    int cells[4 * MAX_COLUMNS];
+};
+
+static void get_listview_info(HWND hwnd, struct remote *r, struct listview_info *info)
+{
+    info->columns = listview_columns(hwnd, r, info->order);
+    info->count = 0;
+    SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &info->count);
+    info->have_cells = FALSE;
+}
+
+/* Screen rects of the cells of a report view row into cells (4 ints each). */
+static void get_listview_cells(HWND hwnd, struct remote *r, struct listview_info *info, int item,
+                               int *cells)
+{
+    const int *order = info->order;
+    RECT rect;
+    int i, row[4];
+
+    if (info->have_cells)
+    {
+        SetRect(&rect, LVIR_BOUNDS, 0, 0, 0);
+        if (!remote_rect(hwnd, r, LVM_GETITEMRECT, item, &rect))
+            SetRectEmpty(&rect);
+        client_to_screen(hwnd, rect, row);
+        for (i = 0; i < info->columns; i++)
+        {
+            cells[4 * i] = info->cells[4 * i];
+            cells[4 * i + 1] = row[1];
+            cells[4 * i + 2] = info->cells[4 * i + 2];
+            cells[4 * i + 3] = row[3];
+        }
+        return;
+    }
+    for (i = 0; i < info->columns; i++)
+    {
+        /* Subitem 0 gives the whole row; its own part is the label. */
+        SetRect(&rect, order[i] ? LVIR_BOUNDS : LVIR_LABEL, order[i], 0, 0);
+        if (!remote_rect(hwnd, r, order[i] ? LVM_GETSUBITEMRECT : LVM_GETITEMRECT, item, &rect))
+            SetRectEmpty(&rect);
+        client_to_screen(hwnd, rect, &cells[4 * i]);
+    }
+    memcpy(info->cells, cells, info->columns * 4 * sizeof(int));
+    info->have_cells = TRUE;
+}
+
+/*
  * Wine's oleacc has only a stub for SysListView32, and the list view
  * emits no focus or selection events, so describe the item through list
  * view messages. The MSAA child id is item + 1, as on Windows. In report
  * view the item is the cell of the first column of a table row, and the
  * texts of the whole row go along, as Orca reads the full row of a GUI
  * table (generator.py, _cells_to_present). FALSE if the text could not
- * be read. r is memory in the target, columns and order come from
- * listview_columns; the tree passes them for all items of a list.
+ * be read. r is memory in the target, info comes from get_listview_info;
+ * the tree passes them for all items of a list.
  */
-static BOOL describe_listview_item_in(HWND hwnd, struct remote *r, int columns, const int *order,
+static BOOL describe_listview_item_in(HWND hwnd, struct remote *r, struct listview_info *info,
                                       int item, struct bridge_object *obj,
                                       struct focus_strings *str)
 {
+    const int *order = info->order;
+    int columns = info->columns;
     WCHAR text[CELL_TEXT_MAX];
-    DWORD_PTR state = 0, count = 0;
+    DWORD_PTR state = 0;
     int i;
     RECT rect;
     BOOL ok, has_rect = FALSE;
@@ -1223,12 +1287,9 @@ static BOOL describe_listview_item_in(HWND hwnd, struct remote *r, int columns, 
             text[0] = 0;
         to_utf8(text, str->cells[i], sizeof(str->cells[i]));
         str->cell_ptrs[i] = str->cells[i];
-        /* Subitem 0 gives the whole row; its own part is the label. */
-        SetRect(&rect, order[i] ? LVIR_BOUNDS : LVIR_LABEL, order[i], 0, 0);
-        if (!remote_rect(hwnd, r, order[i] ? LVM_GETSUBITEMRECT : LVM_GETITEMRECT, item, &rect))
-            SetRectEmpty(&rect);
-        client_to_screen(hwnd, rect, &str->cell_extents[4 * i]);
     }
+    if (ok && columns)
+        get_listview_cells(hwnd, r, info, item, str->cell_extents);
     if (ok && !columns)
     {
         SetRect(&rect, LVIR_BOUNDS, 0, 0, 0);
@@ -1272,23 +1333,22 @@ static BOOL describe_listview_item_in(HWND hwnd, struct remote *r, int columns, 
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
     if (state & LVIS_SELECTED)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
-    SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count);
     obj->position = item + 1;
-    obj->set_size = (int)count;
+    obj->set_size = (int)info->count;
     return TRUE;
 }
 
 static BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *obj,
                                    struct focus_strings *str)
 {
-    int order[MAX_COLUMNS], columns;
+    struct listview_info info;
     struct remote r;
     BOOL ok;
 
     if (!remote_open(hwnd, &r))
         return FALSE;
-    columns = listview_columns(hwnd, &r, order);
-    ok = describe_listview_item_in(hwnd, &r, columns, order, item, obj, str);
+    get_listview_info(hwnd, &r, &info);
+    ok = describe_listview_item_in(hwnd, &r, &info, item, obj, str);
     remote_close(&r);
     return ok;
 }
@@ -1661,18 +1721,39 @@ static LONG tree_child_id(HTREEITEM item)
 }
 
 /*
+ * Level and siblings of the parents met in a walk over the visible items
+ * of a tree (TVGN_FIRSTVISIBLE, then TVGN_NEXTVISIBLE). Visible items come
+ * in tree order, so the next item with the same parent is the next
+ * sibling: its place follows without walking all siblings again, which
+ * costs one round trip each.
+ */
+#define TREE_CACHE_SIZE 8
+
+struct tree_cache
+{
+    struct
+    {
+        HTREEITEM parent;
+        int level, position, set_size;
+    } entries[TREE_CACHE_SIZE];
+    int count, next;
+};
+
+/*
  * Describes the tree item: text, selected and expanded state, its level
  * (from 1) and its place among its siblings. Orca takes the level from
  * the attribute "level" of an item inside a tree (script_utilities.py,
  * node_level) and says it when it changes. FALSE if the item could not be
- * read. r is memory in the target.
+ * read. r is memory in the target. cache is NULL, or the cache of a walk
+ * over the visible items that item is the next one of.
  */
 static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM item,
-                                      struct bridge_object *obj, struct focus_strings *str)
+                                      struct tree_cache *cache, struct bridge_object *obj,
+                                      struct focus_strings *str)
 {
     BYTE header[REMOTE_HEADER];
     WCHAR text[CELL_TEXT_MAX];
-    HTREEITEM next;
+    HTREEITEM next, parent;
     RECT rect;
     UINT state;
     int children, i;
@@ -1749,8 +1830,18 @@ static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM ite
                        BRIDGE_STATE_BIT((state & TVIS_EXPANDED) ? BRIDGE_STATE_EXPANDED
                                                                 : BRIDGE_STATE_COLLAPSED);
 
+    parent = tree_next(hwnd, TVGN_PARENT, item);
+    for (i = 0; cache && i < cache->count; i++)
+    {
+        if (cache->entries[i].parent != parent)
+            continue;
+        obj->level = cache->entries[i].level;
+        obj->position = ++cache->entries[i].position;
+        obj->set_size = cache->entries[i].set_size;
+        return TRUE;
+    }
     obj->level = 1;
-    for (next = item, i = 0; i < TREE_WALK_MAX && (next = tree_next(hwnd, TVGN_PARENT, next)); i++)
+    for (next = parent, i = 0; next && i < TREE_WALK_MAX; next = tree_next(hwnd, TVGN_PARENT, next), i++)
         obj->level++;
     obj->position = 1;
     for (next = item, i = 0; i < TREE_WALK_MAX && (next = tree_next(hwnd, TVGN_PREVIOUS, next)); i++)
@@ -1758,6 +1849,17 @@ static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM ite
     obj->set_size = obj->position;
     for (next = item, i = 0; i < TREE_WALK_MAX && (next = tree_next(hwnd, TVGN_NEXT, next)); i++)
         obj->set_size++;
+    if (cache)
+    {
+        i = cache->next;
+        cache->entries[i].parent = parent;
+        cache->entries[i].level = obj->level;
+        cache->entries[i].position = obj->position;
+        cache->entries[i].set_size = obj->set_size;
+        cache->next = (i + 1) % TREE_CACHE_SIZE;
+        if (cache->count < TREE_CACHE_SIZE)
+            cache->count++;
+    }
     return TRUE;
 }
 
@@ -1769,7 +1871,7 @@ static BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_obje
 
     if (!remote_open(hwnd, &r))
         return FALSE;
-    ok = describe_treeview_item_in(hwnd, &r, item, obj, str);
+    ok = describe_treeview_item_in(hwnd, &r, item, NULL, obj, str);
     remote_close(&r);
     return ok;
 }
@@ -2400,6 +2502,9 @@ struct tree_build
 
 static HWND tree_top;
 static UINT_PTR tree_timer;
+/* Only the items of one control, see schedule_items. */
+static HWND items_control;
+static UINT_PTR items_timer;
 
 static enum tree_kind tree_kind(HWND hwnd, const WCHAR *cls)
 {
@@ -2538,9 +2643,11 @@ static BOOL keep_tree_item(struct tree_build *b, HWND list, const int *clip)
 static void add_tree_items(struct tree_build *b, HWND hwnd, const WCHAR *cls)
 {
     DWORD_PTR top = 0, count = 0, page = 0;
+    struct listview_info info;
+    struct tree_cache cache;
     struct remote r;
     RECT client;
-    int clip[4], order[MAX_COLUMNS], columns, i, end;
+    int clip[4], i, end;
 
     if (!GetClientRect(hwnd, &client))
         return;
@@ -2565,10 +2672,12 @@ static void add_tree_items(struct tree_build *b, HWND hwnd, const WCHAR *cls)
     {
         HTREEITEM item = tree_next(hwnd, TVGN_FIRSTVISIBLE, NULL);
 
+        memset(&cache, 0, sizeof(cache));
         for (; item && b->count < MAX_TREE; item = tree_next(hwnd, TVGN_NEXTVISIBLE, item))
         {
             memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
-            if (!describe_treeview_item_in(hwnd, &r, item, &b->objects[b->count], b->str) ||
+            if (!describe_treeview_item_in(hwnd, &r, item, &cache, &b->objects[b->count],
+                                           b->str) ||
                 !keep_tree_item(b, hwnd, clip))
             {
                 free_strings(b->str);
@@ -2598,18 +2707,16 @@ static void add_tree_items(struct tree_build *b, HWND hwnd, const WCHAR *cls)
          * In icon views the top index is 0 and a page holds every item, so
          * each item is checked against the client area.
          */
+        get_listview_info(hwnd, &r, &info);
         if (!SendMessageTimeoutW(hwnd, LVM_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
-            !SendMessageTimeoutW(hwnd, LVM_GETCOUNTPERPAGE, 0, 0, SMTO_ABORTIFHUNG, 500, &page) ||
-            !SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
-            top = count = page = 0;
-        columns = listview_columns(hwnd, &r, order);
+            !SendMessageTimeoutW(hwnd, LVM_GETCOUNTPERPAGE, 0, 0, SMTO_ABORTIFHUNG, 500, &page))
+            top = page = info.count = 0;
         /* One more for a row cut at the bottom. */
-        end = (int)min(count, top + page + 1);
+        end = (int)min(info.count, top + page + 1);
         for (i = (int)top; i < end && b->count < MAX_TREE; i++)
         {
             memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
-            if (describe_listview_item_in(hwnd, &r, columns, order, i, &b->objects[b->count],
-                                          b->str))
+            if (describe_listview_item_in(hwnd, &r, &info, i, &b->objects[b->count], b->str))
                 keep_tree_item(b, hwnd, clip);
             else
                 free_strings(b->str);
@@ -2649,12 +2756,17 @@ static void add_tree_children(struct tree_build *b, HWND parent)
     }
 }
 
-static void report_tree(HWND top, BOOL items)
+/*
+ * Reports the tree of top, with or without items; with control only the
+ * items of that control in the tree, see bridge_tree.
+ */
+static void report_tree(HWND top, HWND control, BOOL items)
 {
     HANDLE heap = GetProcessHeap();
     struct bridge_tree tree;
     struct tree_build b;
     DWORD start = GetTickCount(), pid = 0;
+    WCHAR cls[256];
     int i;
 
     if (!top || is_console(top))
@@ -2666,7 +2778,10 @@ static void report_tree(HWND top, BOOL items)
     b.items = items;
     if (b.objects && b.parents && b.str)
     {
-        add_tree_children(&b, top);
+        if (!control)
+            add_tree_children(&b, top);
+        else if (GetClassNameW(control, cls, ARRAYSIZE(cls)) && is_item_control(cls))
+            add_tree_items(&b, control, cls);
         memset(&tree, 0, sizeof(tree));
         describe_frame(top, &tree.frame, b.str);
         GetWindowThreadProcessId(top, &pid);
@@ -2677,9 +2792,14 @@ static void report_tree(HWND top, BOOL items)
         tree.objects = b.objects;
         tree.parents = b.parents;
         tree.no_items = !items;
+        tree.control = (ULONG_PTR)control;
         atspi_post_tree(&tree);
-        trace(L"tree: %p %d objects%s in %lu ms", top, b.count, items ? L"" : L" (no items)",
-              GetTickCount() - start);
+        if (control)
+            trace(L"tree: %p %d items of %p in %lu ms", top, b.count, control,
+                  GetTickCount() - start);
+        else
+            trace(L"tree: %p %d objects%s in %lu ms", top, b.count, items ? L"" : L" (no items)",
+                  GetTickCount() - start);
         for (i = 0; i < b.count; i++)
             free_kept_strings(&b.objects[i]);
     }
@@ -2692,8 +2812,12 @@ static void CALLBACK refresh_tree(HWND unused, UINT msg, UINT_PTR id, DWORD time
 {
     KillTimer(NULL, id);
     tree_timer = 0;
+    /* The whole tree has the items too. */
+    if (items_timer)
+        KillTimer(NULL, items_timer);
+    items_timer = 0;
     if (tree_top && IsWindow(tree_top))
-        report_tree(tree_top, TRUE);
+        report_tree(tree_top, NULL, TRUE);
 }
 
 /* Something changed in window hwnd: refresh the tree if hwnd is in it. */
@@ -2702,6 +2826,32 @@ static void schedule_tree(HWND hwnd)
     if (!tree_top || (hwnd != tree_top && !IsChild(tree_top, hwnd)))
         return;
     tree_timer = SetTimer(NULL, tree_timer, TREE_REFRESH_MS, refresh_tree);
+}
+
+static void CALLBACK refresh_items(HWND unused, UINT msg, UINT_PTR id, DWORD time)
+{
+    KillTimer(NULL, id);
+    items_timer = 0;
+    if (tree_top && IsChild(tree_top, items_control))
+        report_tree(tree_top, items_control, TRUE);
+}
+
+/*
+ * A key in list, tree or tab control hwnd may have scrolled it or
+ * expanded an item: refresh only its items, unless the whole tree comes
+ * anyway or another control waits for its items.
+ */
+static void schedule_items(HWND hwnd)
+{
+    if (!tree_top || !IsChild(tree_top, hwnd) || tree_timer)
+        return;
+    if (items_timer && items_control != hwnd)
+    {
+        schedule_tree(hwnd);
+        return;
+    }
+    items_control = hwnd;
+    items_timer = SetTimer(NULL, items_timer, TREE_REFRESH_MS, refresh_items);
 }
 
 /*
@@ -2856,7 +3006,7 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     if (top != tree_top)
     {
         tree_top = top;
-        report_tree(top, FALSE);
+        report_tree(top, NULL, FALSE);
         tree_timer = SetTimer(NULL, tree_timer, 0, refresh_tree);
     }
     atspi_post_focus(&focus);
@@ -3298,10 +3448,10 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
     }
     /*
      * A key may scroll a list or expand a tree item, which tells no event:
-     * the items in the window tree are read again.
+     * its items in the window tree are read again.
      */
     if (list != LIST_BUSY && GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) && is_item_control(cls))
-        schedule_tree(hwnd);
+        schedule_items(hwnd);
     if (list)
     {
         /* A key often changes the status bar, e.g. regedit's key path. */
