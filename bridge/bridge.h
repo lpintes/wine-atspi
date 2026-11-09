@@ -125,10 +125,13 @@ struct bridge_object
      * Columns of a table, in display order: for a table (role TABLE) the
      * column header texts, for a table cell the texts of all cells of its
      * row; the cell itself is the one in the first column. column_count
-     * is 0 for other objects.
+     * is 0 for other objects. column_extents, if not NULL, gives for a
+     * table cell the screen rectangle of each of those cells, as x, y,
+     * width and height.
      */
     int column_count;
     const char *const *columns;
+    const int *column_extents;
     /*
      * Numeric value of a slider or progress bar (AT-SPI Value interface),
      * valid if has_range is non-zero. increment is the step of one arrow
@@ -140,9 +143,9 @@ struct bridge_object
     double current;
     double increment;
     /*
-     * Screen rectangle of a whole window (AT-SPI Component), valid if
-     * has_extents is non-zero. Orca ignores value changes of a progress
-     * bar without a size.
+     * Screen rectangle of a window or an item (AT-SPI Component), valid
+     * if has_extents is non-zero. Orca ignores value changes of a progress
+     * bar without a size, and flat review places objects by it.
      */
     int has_extents;
     int x;
@@ -184,6 +187,8 @@ struct bridge_focus
  * (object navigation, flat review). objects are in tree order, each
  * parent before its children and siblings in Z order; parents[i] is the
  * hwnd of the parent of objects[i]: frame.hwnd or an earlier object.
+ * The items shown by a list, tree or tab control (child non-zero) follow
+ * it, with its hwnd as parent.
  */
 struct bridge_tree
 {

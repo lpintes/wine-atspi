@@ -90,6 +90,7 @@ struct focus_strings
     /* Column texts of a table: cells of the focused row, or the headers. */
     char cells[MAX_COLUMNS][NAME_MAX_UTF8];
     const char *cell_ptrs[MAX_COLUMNS];
+    int cell_extents[MAX_COLUMNS * 4];
     char headers[MAX_COLUMNS][NAME_MAX_UTF8];
     const char *header_ptrs[MAX_COLUMNS];
     char labels[MAX_LABELS][LABEL_MAX_UTF8];
@@ -302,7 +303,7 @@ static void refine_class_states(HWND hwnd, struct bridge_object *obj)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_INDETERMINATE);
 }
 
-/* Screen rectangle of a whole window. Items have none. */
+/* Screen rectangle of a whole window. */
 static void get_extents(HWND hwnd, struct bridge_object *obj)
 {
     RECT rect;
@@ -314,6 +315,29 @@ static void get_extents(HWND hwnd, struct bridge_object *obj)
     obj->y = rect.top;
     obj->width = rect.right - rect.left;
     obj->height = rect.bottom - rect.top;
+}
+
+/* rect in the client coordinates of hwnd as x, y, width and height on the screen. */
+static void client_to_screen(HWND hwnd, RECT rect, int *out)
+{
+    MapWindowPoints(hwnd, HWND_DESKTOP, (POINT *)&rect, 2);
+    out[0] = rect.left;
+    out[1] = rect.top;
+    out[2] = rect.right - rect.left;
+    out[3] = rect.bottom - rect.top;
+}
+
+/* Screen rectangle of an item, from rect in the client coordinates of its list. */
+static void set_item_extents(HWND hwnd, RECT rect, struct bridge_object *obj)
+{
+    int r[4];
+
+    client_to_screen(hwnd, rect, r);
+    obj->has_extents = TRUE;
+    obj->x = r[0];
+    obj->y = r[1];
+    obj->width = r[2];
+    obj->height = r[3];
 }
 
 /*
@@ -855,6 +879,21 @@ static BOOL remote_text(HWND hwnd, struct remote *r, UINT msg, WPARAM wparam,
     return TRUE;
 }
 
+/*
+ * Sends msg with a pointer to a RECT in the target that starts as rect,
+ * and reads it back. Item rect messages of comctl32 take their input in
+ * the RECT (LVM_GETSUBITEMRECT, TVM_GETITEMRECT).
+ */
+static BOOL remote_rect(HWND hwnd, struct remote *r, UINT msg, WPARAM wparam, RECT *rect)
+{
+    DWORD_PTR ret = 0;
+    SIZE_T done;
+
+    return WriteProcessMemory(r->process, r->base, rect, sizeof(*rect), &done) &&
+           SendMessageTimeoutW(hwnd, msg, wparam, (LPARAM)r->base, SMTO_ABORTIFHUNG, 500, &ret) &&
+           ret && ReadProcessMemory(r->process, r->base, rect, sizeof(*rect), &done);
+}
+
 /* Text of item's subitem (0 for the item itself) of a list view. */
 static BOOL get_listview_text(HWND hwnd, struct remote *r, int item, int subitem, WCHAR *buf)
 {
@@ -972,7 +1011,8 @@ static BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *ob
     DWORD_PTR state = 0, count = 0;
     int order[MAX_COLUMNS], columns, i;
     struct remote r;
-    BOOL ok;
+    RECT rect;
+    BOOL ok, has_rect = FALSE;
 
     if (!remote_open(hwnd, &r))
         return FALSE;
@@ -984,16 +1024,39 @@ static BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *ob
             text[0] = 0;
         to_utf8(text, str->cells[i], sizeof(str->cells[i]));
         str->cell_ptrs[i] = str->cells[i];
+        /* Subitem 0 gives the whole row; its own part is the label. */
+        SetRect(&rect, order[i] ? LVIR_BOUNDS : LVIR_LABEL, order[i], 0, 0);
+        if (!remote_rect(hwnd, &r, order[i] ? LVM_GETSUBITEMRECT : LVM_GETITEMRECT, item, &rect))
+            SetRectEmpty(&rect);
+        client_to_screen(hwnd, rect, &str->cell_extents[4 * i]);
+    }
+    if (ok && !columns)
+    {
+        SetRect(&rect, LVIR_BOUNDS, 0, 0, 0);
+        has_rect = remote_rect(hwnd, &r, LVM_GETITEMRECT, item, &rect);
     }
     remote_close(&r);
     if (!ok)
         return FALSE;
+    if (has_rect)
+        set_item_extents(hwnd, rect, obj);
+    else if (columns)
+    {
+        obj->has_extents = TRUE;
+        obj->x = str->cell_extents[0];
+        obj->y = str->cell_extents[1];
+        obj->width = str->cell_extents[2];
+        obj->height = str->cell_extents[3];
+    }
+    else
+        obj->has_extents = FALSE;
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->child = item + 1;
     obj->role = columns ? BRIDGE_ROLE_TABLE_CELL : BRIDGE_ROLE_LIST_ITEM;
     obj->value = NULL;
     obj->column_count = columns;
     obj->columns = columns ? str->cell_ptrs : NULL;
+    obj->column_extents = columns ? str->cell_extents : NULL;
     if (columns)
         lstrcpyA(str->object, str->cells[0]);
     else
@@ -1032,6 +1095,13 @@ static BOOL is_tab_control(const WCHAR *cls)
     return !lstrcmpiW(cls, L"SysTabControl32");
 }
 
+/* A control whose items the bridge reads with messages: a list, list view, tree view or tab control. */
+static BOOL is_item_control(const WCHAR *cls)
+{
+    return is_list_box(cls) || !lstrcmpiW(cls, L"SysListView32") || is_tree_view(cls) ||
+           is_tab_control(cls);
+}
+
 /*
  * The focused tab of a tab control, -1 if none; LIST_BUSY if it did not
  * answer. Without TCS_BUTTONS it is the selected tab as well.
@@ -1059,6 +1129,7 @@ static BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
     WCHAR text[CELL_TEXT_MAX];
     DWORD_PTR selected = (DWORD_PTR)-1, count = 0;
     struct remote r;
+    RECT rect;
     BOOL ok;
 
     if (!remote_open(hwnd, &r))
@@ -1081,6 +1152,10 @@ static BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
         tc->cchTextMax = CELL_TEXT_MAX;
     }
     ok = remote_text(hwnd, &r, TCM_GETITEMW, item, header, text);
+    SetRectEmpty(&rect);
+    obj->has_extents = FALSE;
+    if (ok && remote_rect(hwnd, &r, TCM_GETITEMRECT, item, &rect))
+        set_item_extents(hwnd, rect, obj);
     remote_close(&r);
     if (!ok)
         return FALSE;
@@ -1242,8 +1317,9 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
                                  struct focus_strings *str)
 {
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
-    DWORD_PTR count = 0, len = 0, sel = 0;
+    DWORD_PTR count = 0, len = 0, sel = 0, ret = 0;
     WCHAR *text;
+    RECT rect;
 
     if (!SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
         return LIST_BUSY;
@@ -1283,6 +1359,10 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
     if (SendMessageTimeoutW(hwnd, LB_GETSEL, item, 0, SMTO_ABORTIFHUNG, 500, &sel) &&
         (LONG)sel > 0)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    obj->has_extents = FALSE;
+    if (SendMessageTimeoutW(hwnd, LB_GETITEMRECT, item, (LPARAM)&rect,
+                            SMTO_ABORTIFHUNG, 500, &ret) && (LONG)ret != LB_ERR)
+        set_item_extents(hwnd, rect, obj);
     obj->position = item + 1;
     obj->set_size = (int)count;
     return TRUE;
@@ -1347,6 +1427,7 @@ static BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_obje
     WCHAR text[CELL_TEXT_MAX];
     HTREEITEM next;
     struct remote r;
+    RECT rect;
     UINT state;
     int children, i;
     SIZE_T done;
@@ -1377,6 +1458,19 @@ static BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_obje
     }
     ok = remote_text(hwnd, &r, TVM_GETITEMW, 0, header, text) &&
          ReadProcessMemory(r.process, r.base, header, sizeof(header), &done);
+    /* The item goes in the RECT, as a handle of the target's size; FALSE if scrolled away. */
+    memset(&rect, 0, sizeof(rect));
+    if (r.wow64)
+    {
+        ULONG item32 = (ULONG)(ULONG_PTR)item;
+
+        memcpy(&rect, &item32, sizeof(item32));
+    }
+    else
+        memcpy(&rect, &item, sizeof(item));
+    obj->has_extents = FALSE;
+    if (ok && remote_rect(hwnd, &r, TVM_GETITEMRECT, TRUE, &rect))
+        set_item_extents(hwnd, rect, obj);
     remote_close(&r);
     if (!ok)
         return FALSE;
@@ -1990,8 +2084,7 @@ static BOOL describe_tree_window(HWND hwnd, const WCHAR *cls, struct bridge_obje
     memset(obj, 0, sizeof(*obj));
     if (!lstrcmpiW(cls, L"Static"))
         return describe_label(hwnd, str->object, sizeof(str->object), obj);
-    if (is_list_box(cls) || !lstrcmpiW(cls, L"SysListView32") || is_tree_view(cls) ||
-        is_tab_control(cls))
+    if (is_item_control(cls))
     {
         describe_container(hwnd, obj, str);
         return obj->hwnd != 0;
@@ -2019,8 +2112,13 @@ static char *dup_utf8(const char *s)
 static void keep_strings(struct bridge_object *obj)
 {
     const char **columns = NULL;
+    int *extents = NULL;
     int i;
 
+    if (obj->column_count > 0 && obj->column_extents &&
+        (extents = HeapAlloc(GetProcessHeap(), 0, obj->column_count * 4 * sizeof(int))))
+        memcpy(extents, obj->column_extents, obj->column_count * 4 * sizeof(int));
+    obj->column_extents = extents;
     obj->name = dup_utf8(obj->name);
     obj->value = dup_utf8(obj->value);
     obj->window_class = dup_utf8(obj->window_class);
@@ -2048,6 +2146,108 @@ static void free_kept_strings(struct bridge_object *obj)
     for (i = 0; i < obj->column_count; i++)
         HeapFree(heap, 0, (char *)obj->columns[i]);
     HeapFree(heap, 0, (void *)obj->columns);
+    HeapFree(heap, 0, (void *)obj->column_extents);
+}
+
+/*
+ * Keeps the item just described into b->objects[b->count] if it lies in
+ * the client area clip; FALSE if it does not.
+ */
+static BOOL keep_tree_item(struct tree_build *b, HWND list, const int *clip)
+{
+    struct bridge_object *obj = &b->objects[b->count];
+    BOOL shown = obj->has_extents && obj->width > 0 && obj->height > 0 &&
+                 obj->x < clip[0] + clip[2] && obj->x + obj->width > clip[0] &&
+                 obj->y < clip[1] + clip[3] && obj->y + obj->height > clip[1];
+
+    if (shown)
+    {
+        keep_strings(obj);
+        b->parents[b->count++] = (ULONG_PTR)list;
+    }
+    free_strings(b->str);
+    return shown;
+}
+
+/*
+ * The items a list, list view, tree view or tab control shows, after the
+ * control itself, so that flat review sees them. Only the items in view:
+ * a list may hold thousands.
+ */
+static void add_tree_items(struct tree_build *b, HWND hwnd, const WCHAR *cls)
+{
+    DWORD_PTR top = 0, count = 0, page = 0;
+    RECT client;
+    int clip[4], i, end;
+
+    if (!GetClientRect(hwnd, &client))
+        return;
+    client_to_screen(hwnd, client, clip);
+    if (is_tab_control(cls))
+    {
+        if (!SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+            return;
+        for (i = 0; i < (int)count && b->count < MAX_TREE; i++)
+        {
+            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
+            if (describe_tab_item(hwnd, i, &b->objects[b->count], b->str))
+                keep_tree_item(b, hwnd, clip);
+            else
+                free_strings(b->str);
+        }
+    }
+    else if (is_tree_view(cls))
+    {
+        HTREEITEM item = tree_next(hwnd, TVGN_FIRSTVISIBLE, NULL);
+
+        for (; item && b->count < MAX_TREE; item = tree_next(hwnd, TVGN_NEXTVISIBLE, item))
+        {
+            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
+            if (!describe_treeview_item(hwnd, item, &b->objects[b->count], b->str) ||
+                !keep_tree_item(b, hwnd, clip))
+            {
+                free_strings(b->str);
+                break;
+            }
+        }
+    }
+    else if (is_list_box(cls))
+    {
+        if (!SendMessageTimeoutW(hwnd, LB_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
+            !SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+            return;
+        for (i = (int)top; i < (int)count && b->count < MAX_TREE; i++)
+        {
+            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
+            if (describe_listbox_item(hwnd, i, &b->objects[b->count], b->str) != TRUE ||
+                !keep_tree_item(b, hwnd, clip))
+            {
+                free_strings(b->str);
+                break;
+            }
+        }
+    }
+    else
+    {
+        /*
+         * In icon views the top index is 0 and a page holds every item, so
+         * each item is checked against the client area.
+         */
+        if (!SendMessageTimeoutW(hwnd, LVM_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
+            !SendMessageTimeoutW(hwnd, LVM_GETCOUNTPERPAGE, 0, 0, SMTO_ABORTIFHUNG, 500, &page) ||
+            !SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+            return;
+        /* One more for a row cut at the bottom. */
+        end = (int)min(count, top + page + 1);
+        for (i = (int)top; i < end && b->count < MAX_TREE; i++)
+        {
+            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
+            if (describe_listview_item(hwnd, i, &b->objects[b->count], b->str))
+                keep_tree_item(b, hwnd, clip);
+            else
+                free_strings(b->str);
+        }
+    }
 }
 
 static void add_tree_children(struct tree_build *b, HWND parent)
@@ -2075,6 +2275,8 @@ static void add_tree_children(struct tree_build *b, HWND parent)
         b->parents[b->count++] = (ULONG_PTR)parent;
         if (kind == TREE_NODE)
             add_tree_children(b, hwnd);
+        else if (is_item_control(cls))
+            add_tree_items(b, hwnd, cls);
     }
 }
 
@@ -2688,6 +2890,7 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
     struct focus_strings str;
     GUITHREADINFO gti;
     HWND hwnd = last_focus.hwnd;
+    WCHAR cls[256];
     int list;
 
     KillTimer(NULL, id);
@@ -2716,6 +2919,12 @@ static void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD t
         key_timer = SetTimer(NULL, 0, KEY_CHECK_DELAY_MS, check_after_key);
         return;
     }
+    /*
+     * A key may scroll a list or expand a tree item, which tells no event:
+     * the items in the window tree are read again.
+     */
+    if (list != LIST_BUSY && GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) && is_item_control(cls))
+        schedule_tree(hwnd);
     if (list)
     {
         /* A key often changes the status bar, e.g. regedit's key path. */

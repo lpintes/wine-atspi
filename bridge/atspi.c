@@ -1359,12 +1359,18 @@ static struct node *item_at(struct node *list, guint index)
     list->children->pdata[index] = item;
     item->window_class = g_strdup(list->window_class);
     item->placeholder = TRUE;
+    /*
+     * Not showing: it may be scrolled away, and Orca's flat review skips
+     * objects that are not showing (ax_utilities.py, is_on_screen). The
+     * window tree describes the items on screen.
+     */
     item->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
                    BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
-                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
-                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
+                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE);
     if (list->role == BRIDGE_ROLE_TABLE && index < n)
     {
+        /* Column headers stay on screen while the rows scroll. */
+        item->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
         item->role = BRIDGE_ROLE_COLUMN_HEADER;
         item->name = g_strdup(list->headers ? list->headers[index] : "");
         item->row = -1;
@@ -1480,6 +1486,16 @@ static void set_row(struct node *cell, const struct bridge_object *obj)
         other->states = cell->states & ~OWN_STATES;
         other->position = cell->position;
         other->set_size = cell->set_size;
+        if (obj->column_extents)
+        {
+            const int *r = obj->column_extents + 4 * i;
+
+            other->has_extents = TRUE;
+            other->x = r[0];
+            other->y = r[1];
+            other->width = r[2];
+            other->height = r[3];
+        }
     }
 }
 
@@ -1950,11 +1966,15 @@ static gboolean tree_idle(gpointer data)
         g_ptr_array_add(nodes, node);
     }
 
-    /* Tree nodes have tree nodes or the frame as parents, so none is freed here. */
+    /*
+     * Tree nodes have tree nodes or the frame as parents, so none is freed
+     * here. An item scrolled away leaves too, but not the focused one: the
+     * focus stays where it is.
+     */
     for (j = 0; j < old->len; j++)
     {
         node = g_hash_table_lookup(app->nodes, old->pdata[j]);
-        if (node && !node->in_tree)
+        if (node && !node->in_tree && node != focused)
             node_remove(node);
     }
     order_children(frame);
@@ -2038,6 +2058,7 @@ static void free_object(struct bridge_object *obj)
     g_free((char *)obj->shortcut);
     g_free((char *)obj->text);
     g_strfreev((char **)obj->columns);
+    g_free((int *)obj->column_extents);
 }
 
 static void free_update(gpointer data)
@@ -2083,9 +2104,14 @@ static void copy_object(struct bridge_object *dst, const struct bridge_object *s
         for (i = 0; i < src->column_count; i++)
             columns[i] = g_strdup(src->columns[i] ? src->columns[i] : "");
         dst->columns = (const char *const *)columns;
+        if (src->column_extents)
+            dst->column_extents = g_memdup2(src->column_extents,
+                                            src->column_count * 4 * sizeof(int));
     }
     else
         dst->column_count = 0;
+    if (!dst->columns)
+        dst->column_extents = NULL;
 }
 
 static void post(GSourceFunc func, gpointer data, GDestroyNotify free_func)
