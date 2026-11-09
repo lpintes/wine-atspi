@@ -366,6 +366,7 @@ struct node
     char *value;
     char *window_class;
     char *shortcut;         /* accelerator of a menu item, or NULL */
+    guint64 hwnd;           /* window of the object, 0 for the root and placeholders */
     /* Text interface; chars is NULL for nodes without one. */
     gunichar *chars;
     glong count;
@@ -629,6 +630,8 @@ static GVariant *empty_attributes(void)
     return g_variant_new_array(G_VARIANT_TYPE("{ss}"), NULL, 0);
 }
 
+static void coord_origin(struct node *node, guint coord_type, gint *x, gint *y);
+
 /* Handles a Text method; NULL if method is none. */
 static GVariant *text_method(struct node *node, const char *method, GVariant *params)
 {
@@ -695,7 +698,22 @@ static GVariant *text_method(struct node *node, const char *method, GVariant *pa
     if (!g_strcmp0(method, "GetAttributeValue"))
         return g_variant_new("(s)", "");
     if (!g_strcmp0(method, "GetCharacterExtents") || !g_strcmp0(method, "GetRangeExtents"))
-        return g_variant_new("(iiii)", 0, 0, 0, 0);
+    {
+        gint rect[4] = { 0, 0, 0, 0 }, ox, oy;
+        guint coord_type;
+
+        if (!g_strcmp0(method, "GetCharacterExtents"))
+        {
+            g_variant_get(params, "(iu)", &start, &coord_type);
+            end = start + 1;
+        }
+        else
+            g_variant_get(params, "(iiu)", &start, &end, &coord_type);
+        if (!bridge_text_extents(node->hwnd, node->chars, node->count, start, end, rect))
+            return g_variant_new("(iiii)", 0, 0, 0, 0);
+        coord_origin(node, coord_type, &ox, &oy);
+        return g_variant_new("(iiii)", rect[0] - ox, rect[1] - oy, rect[2], rect[3]);
+    }
     if (!g_strcmp0(method, "GetOffsetAtPoint"))
         return g_variant_new("(i)", -1);
     /* Changing the caret or selection would need the Win32 thread; not yet. */
@@ -1617,6 +1635,8 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
             item_at(parent, obj->child - 1);
     }
     node = g_hash_table_lookup(app->nodes, id);
+    if (node)
+        node->hwnd = obj->hwnd;
     if (node && !node->placeholder)
         update_node(node, obj);
     else

@@ -571,6 +571,181 @@ static BOOL has_edit_text(const WCHAR *cls)
            !lstrcmpiW(cls, L"RichEdit20A") || !lstrcmpiW(cls, L"RichEdit20W");
 }
 
+/* A range out of the client area lies this far above or below the window. */
+#define TEXT_FAR_AWAY 100000
+
+/* Lines below the first visible one whose packed EM_POSFROMCHAR y is sure not to wrap. */
+#define TEXT_SAFE_LINES 1000
+
+/*
+ * Index into the text of an Edit (rich FALSE) or RichEdit of AT-SPI
+ * offset in chars: astral code points take two UTF-16 units, and "\n" was
+ * "\r\n" in an Edit but one "\r" in a RichEdit (see rich_text_index).
+ */
+static int control_index(const unsigned int *chars, int count, int offset, BOOL rich)
+{
+    int i, index = 0;
+
+    for (i = 0; i < offset && i < count; i++)
+        index += (chars[i] > 0xffff ? 2 : 1) + (!rich && chars[i] == '\n');
+    return index;
+}
+
+/* Client position of the character at index; FALSE past the end of the text. */
+static BOOL text_pos(HWND hwnd, int index, POINT *pt)
+{
+    DWORD_PTR pos;
+
+    if (!SendMessageTimeoutW(hwnd, EM_POSFROMCHAR, index, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
+        pos == (DWORD_PTR)-1)
+        return FALSE;
+    pt->x = (short)LOWORD(pos);
+    pt->y = (short)HIWORD(pos);
+    return TRUE;
+}
+
+static int text_send(HWND hwnd, UINT msg, WPARAM wparam)
+{
+    DWORD_PTR result = 0;
+
+    SendMessageTimeoutW(hwnd, msg, wparam, 0, SMTO_ABORTIFHUNG, 500, &result);
+    return (int)result;
+}
+
+/* Height of one line; the edit control does not tell, so measure two lines. */
+static int text_line_height(HWND hwnd, int first_visible, int lines, const RECT *client)
+{
+    GUITHREADINFO gti;
+    POINT a, b;
+
+    if (first_visible + 1 < lines &&
+        text_pos(hwnd, text_send(hwnd, EM_LINEINDEX, first_visible), &a) &&
+        text_pos(hwnd, text_send(hwnd, EM_LINEINDEX, first_visible + 1), &b) && b.y > a.y)
+        return b.y - a.y;
+    memset(&gti, 0, sizeof(gti));
+    gti.cbSize = sizeof(gti);
+    if (GetGUIThreadInfo(GetWindowThreadProcessId(hwnd, NULL), &gti) && gti.hwndCaret == hwnd &&
+        gti.rcCaret.bottom > gti.rcCaret.top)
+        return gti.rcCaret.bottom - gti.rcCaret.top;
+    return client->bottom - client->top;
+}
+
+/*
+ * Client x just after the last character of the line holding index; len
+ * is the length of the whole text. A line break has the position of that
+ * end; the last line has none, so its last character gets the average
+ * width of the line.
+ */
+static int text_line_end(HWND hwnd, int index, int len, int height)
+{
+    int start = text_send(hwnd, EM_LINEINDEX, text_send(hwnd, EM_LINEFROMCHAR, index));
+    int end = start + text_send(hwnd, EM_LINELENGTH, index);
+    POINT first, last;
+
+    if (end < len && text_pos(hwnd, end, &last))
+        return last.x;
+    if (end <= start || !text_pos(hwnd, end - 1, &last))
+        return 0;
+    if (end - 1 > start && text_pos(hwnd, start, &first) && last.x > first.x)
+        return last.x + (last.x - first.x) / (end - 1 - start);
+    return last.x + height / 2;
+}
+
+int bridge_text_extents(unsigned long long handle, const unsigned int *chars, int count,
+                        int start, int end, int *rect)
+{
+    HWND hwnd = (HWND)(ULONG_PTR)handle;
+    int first_index, end_index, len, lines, first_line, last_line, first_visible, height, i;
+    WCHAR cls[64];
+    BOOL rich, multi;
+    RECT client, r;
+    POINT pt;
+
+    if (!chars || !hwnd || !IsWindow(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
+        !has_edit_text(cls))
+        return 0;
+    rich = lstrcmpiW(cls, L"Edit") != 0;
+    start = max(start, 0);
+    end = min(end, count);
+    if (start >= end)
+        return 0;
+    first_index = control_index(chars, count, start, rich);
+    end_index = control_index(chars, count, end, rich);
+    len = control_index(chars, count, count, rich);
+    if (!GetClientRect(hwnd, &client) || !text_pos(hwnd, first_index, &pt))
+        return 0;
+
+    multi = rich || (GetWindowLongW(hwnd, GWL_STYLE) & ES_MULTILINE);
+    lines = multi ? text_send(hwnd, EM_GETLINECOUNT, 0) : 1;
+    /* For a single-line Edit EM_GETFIRSTVISIBLELINE gives a character. */
+    first_visible = multi ? text_send(hwnd, EM_GETFIRSTVISIBLELINE, 0) : 0;
+    first_line = multi ? text_send(hwnd, EM_LINEFROMCHAR, first_index) : 0;
+    last_line = multi ? text_send(hwnd, EM_LINEFROMCHAR, end_index - 1) : 0;
+    height = text_line_height(hwnd, first_visible, lines, &client);
+
+    /*
+     * EM_POSFROMCHAR packs y into 16 bits, which wraps far from the first
+     * visible line, so lines are placed by their number where it could.
+     */
+    if (last_line < first_visible)
+        r.top = r.bottom = -TEXT_FAR_AWAY;
+    else if (first_line - first_visible > TEXT_SAFE_LINES)
+        r.top = r.bottom = TEXT_FAR_AWAY;
+    else
+    {
+        r.top = first_line < first_visible ? client.top : pt.y;
+        if (last_line - first_visible > TEXT_SAFE_LINES)
+            r.bottom = client.bottom;
+        else if (last_line == first_line)
+            r.bottom = pt.y + height;
+        else if (text_pos(hwnd, text_send(hwnd, EM_LINEINDEX, last_line), &pt))
+            r.bottom = pt.y + height;
+        else
+            r.bottom = client.bottom;
+        r.top = max(r.top, client.top);
+        r.bottom = min(r.bottom, client.bottom);
+        if (r.top >= r.bottom)
+            r.top = r.bottom = r.top >= client.bottom ? TEXT_FAR_AWAY : -TEXT_FAR_AWAY;
+    }
+    if (r.top == r.bottom)
+    {
+        /* Keep the line height, so that the middle of the line is out as well. */
+        r.left = client.left;
+        r.right = client.left;
+        r.bottom = r.top + height;
+        client_to_screen(hwnd, r, rect);
+        return 1;
+    }
+
+    if (first_line != last_line)
+    {
+        r.left = client.left;
+        r.right = client.right;
+    }
+    else
+    {
+        text_pos(hwnd, first_index, &pt);
+        r.left = pt.x;
+        if (end_index < len && (!multi || text_send(hwnd, EM_LINEFROMCHAR, end_index) == first_line) &&
+            text_pos(hwnd, end_index, &pt))
+            r.right = pt.x;
+        else
+            r.right = text_line_end(hwnd, first_index, len, height);
+        if (r.right < r.left)
+        {
+            i = r.left;
+            r.left = r.right;
+            r.right = i;
+        }
+        r.left = max(r.left, client.left);
+        r.right = min(r.right, client.right);
+        if (r.right < r.left)
+            r.right = r.left;
+    }
+    client_to_screen(hwnd, r, rect);
+    return 1;
+}
+
 static void get_class(HWND hwnd, WCHAR *cls, int len, char *dst, int size)
 {
     if (!GetClassNameW(hwnd, cls, len))

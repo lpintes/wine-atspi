@@ -40,7 +40,32 @@ def describe(obj):
         line += " text=%r" % (Atspi.Text.get_text(text, 0, -1) if text else None)
     if VERBOSE and obj.get_role() != Atspi.Role.APPLICATION:
         line += details(obj)
+        if obj.get_role() in (Atspi.Role.TEXT, Atspi.Role.ENTRY):
+            line += text_lines(obj)
     return line
+
+
+def text_lines(obj):
+    """Each line of a text object with its range rect, as flat review asks."""
+    text = obj.get_text_iface()
+    if text is None:
+        return ""
+    out = []
+    count = Atspi.Text.get_character_count(text)
+    offset = 0
+    while offset < count and len(out) < 80:
+        r = Atspi.Text.get_string_at_offset(text, offset, Atspi.TextGranularity.LINE)
+        if r.end_offset <= offset:
+            break
+        e = Atspi.Text.get_range_extents(text, r.start_offset, r.end_offset,
+                                         Atspi.CoordType.WINDOW)
+        out.append("\n    line %d-%d %r rect=%d,%d %dx%d" % (
+            r.start_offset, r.end_offset, r.content, e.x, e.y, e.width, e.height))
+        offset = r.end_offset
+    if count:
+        c = Atspi.Text.get_character_extents(text, 0, Atspi.CoordType.WINDOW)
+        out.append("\n    char 0 rect=%d,%d %dx%d" % (c.x, c.y, c.width, c.height))
+    return "".join(out)
 
 
 def dump(obj, depth):

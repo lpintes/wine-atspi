@@ -273,4 +273,21 @@ void atspi_post_window_gone(unsigned long long hwnd);
  */
 void atspi_post_app_gone(unsigned int pid);
 
+/*
+ * Implemented by the Win32 side for what the AT-SPI side cannot keep in
+ * its model. Called on the AT-SPI thread when a screen reader asks.
+ */
+
+/*
+ * Screen rectangle of the characters start up to end (exclusive) of the
+ * text control hwnd (Edit or RichEdit), whose text the AT-SPI side holds
+ * as chars: count code points, line breaks "\n". Writes x, y, width and
+ * height into rect. A range on several lines gives their union, clipped
+ * to the client area; a range scrolled out of it lies far above or below
+ * the window, so a screen reader can tell the visible lines. Returns 0 if
+ * hwnd gives no positions.
+ */
+int bridge_text_extents(unsigned long long hwnd, const unsigned int *chars, int count,
+                        int start, int end, int *rect);
+
 #endif

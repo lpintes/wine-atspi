@@ -372,6 +372,20 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   with a granularity (`ax_text.py`), plus caret offset, character count,
   `get_text` and selections. For multi-line text at the end offset it
   expects the empty last line, as GTK3 gives it.
+- Flat review (`flat_review.py`, `_get_on_screen_objects` in
+  `ax_utilities.py`) starts at the dialog or frame of the focus and
+  takes objects that are showing and intersect its rect (all rects in
+  WINDOW coordinates). An object with a name, description or text is a
+  zone; zones are sorted into lines by y (5 px), then x. A single-line
+  editable text is one zone with its component rect; multi-line text
+  gives its visible lines (`get_visible_lines`: binary search with
+  `Text.GetRangeExtents` of each line, compared by the line's middle
+  with the clip rect), then words by `GetRangeExtents` too. The bridge
+  answers it on the AT-SPI thread through `bridge_text_extents`
+  (`EM_POSFROMCHAR`); lines scrolled out lie about 100000 px above or
+  below the window. The review context is rebuilt after any other key
+  or a caret move of the reviewed object. Confirmed with Orca in
+  notepad and wordpad (2026-11-09).
 
 Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
 
@@ -385,6 +399,11 @@ Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
   report to the registry, as GTK's atk-bridge does. The bridge therefore
   reports every key from its `WH_KEYBOARD_LL` hook (`report_key`,
   `atspi_post_key`).
+- With the legacy device Orca cannot consume keys, so its own commands
+  reach the Wine program too: KP_7 / KP_8 / KP_9 with NumLock off are
+  Home / Up / Page Up there. In flat review this moves the caret and
+  scrolls the text back; in a list it moves the focus. Not a bridge
+  bug; test review commands in the Arch image.
 - The registry's `DeviceEventController.NotifyListenersSync`
   (`/org/a11y/atspi/registry/deviceeventcontroller` on
   `org.a11y.atspi.Registry`) accepts only one struct `(uinnisb)`: type
