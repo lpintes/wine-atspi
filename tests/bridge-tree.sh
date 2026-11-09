@@ -28,6 +28,21 @@ sleep 3
     echo "--- controls"
     python3 tests/atspi-dump.py -v controls
 } > "$LOG" 2>&1
+# The Files table with rows 1 and 2 selected: Selection lists both, and
+# the cells at the table's corners span all three rows.
+timeout 10 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 k:tab k:tab k:tab w:500 \
+    k:down w:300 k:down w:300 k:shift+down w:1000
+{
+    echo "--- controls, Files rows 1-2 selected"
+    python3 tests/atspi-dump.py -v controls
+} >> "$LOG" 2>&1
+# End scrolls the table to its last row: the visible cells start below
+# row 0, the rows scrolled away are no longer showing.
+timeout 10 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 k:end w:1000
+{
+    echo "--- controls, Files scrolled to the end"
+    python3 tests/atspi-dump.py -v controls
+} >> "$LOG" 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 k:escape w:1000
 
 # notepad: frame > text (and the menu bar once a menu was open).

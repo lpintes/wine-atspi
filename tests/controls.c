@@ -10,7 +10,8 @@
  *   "Empty:"   ListBox without items
  *   "Colors:"  ListBox, extended selection: Red, Green, Blue
  *   "Files:"   SysListView32 in report view, columns Name, Size, Type,
- *              rows readme.txt / notes.md / src
+ *              rows readme.txt / notes.md / src / tests / docs / LICENSE /
+ *              Makefile / todo.txt, more than it shows
  *   "Places:"  SysTreeView32, collapsed: Home (Documents, Music),
  *              Work (Reports), Trash
  *   "Sections:" SysTabControl32: General, Advanced, About
@@ -60,6 +61,11 @@ static void add_files(HWND parent, int y)
         { L"readme.txt", L"2 KB", L"Text" },
         { L"notes.md", L"5 KB", L"Markdown" },
         { L"src", L"", L"Folder" },
+        { L"tests", L"", L"Folder" },
+        { L"docs", L"", L"Folder" },
+        { L"LICENSE", L"1 KB", L"Text" },
+        { L"Makefile", L"3 KB", L"Makefile" },
+        { L"todo.txt", L"1 KB", L"Text" },
     };
     LVCOLUMNW col = { 0 };
     LVITEMW item = { 0 };

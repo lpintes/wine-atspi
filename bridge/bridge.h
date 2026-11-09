@@ -133,6 +133,14 @@ struct bridge_object
     const char *const *columns;
     const int *column_extents;
     /*
+     * Selection of a table: selected_count rows are selected, the first
+     * selected_listed of them (row indices from 0, ascending) are in
+     * selected_rows. 0 and NULL for other objects.
+     */
+    int selected_count;
+    int selected_listed;
+    const int *selected_rows;
+    /*
      * Numeric value of a slider or progress bar (AT-SPI Value interface),
      * valid if has_range is non-zero. increment is the step of one arrow
      * key, 0 if unknown.

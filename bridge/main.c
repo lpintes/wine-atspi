@@ -22,6 +22,8 @@
 #define NAME_MAX_UTF8 1024
 /* Columns of a list view in report view beyond this are left out. */
 #define MAX_COLUMNS 16
+/* Selected rows of a table listed by index; beyond this only counted. */
+#define MAX_SELECTED_ROWS 64
 /* Texts of a window that name no control, see describe_labels. */
 #define MAX_LABELS 16
 #define LABEL_MAX_UTF8 2048
@@ -93,6 +95,7 @@ struct focus_strings
     int cell_extents[MAX_COLUMNS * 4];
     char headers[MAX_COLUMNS][NAME_MAX_UTF8];
     const char *header_ptrs[MAX_COLUMNS];
+    int selected_rows[MAX_SELECTED_ROWS];
     char labels[MAX_LABELS][LABEL_MAX_UTF8];
     struct bridge_object label_objects[MAX_LABELS];
     char *text;     /* heap, see free_strings */
@@ -1380,6 +1383,30 @@ static BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
 }
 
 /*
+ * Selected rows of a list view in report view, for the table's Selection
+ * interface: with it Orca's flat review reads only the visible cells
+ * (ax_utilities.py, _get_on_screen_objects), and Where Am I counts the
+ * selected rows from the table.
+ */
+static void describe_table_selection(HWND hwnd, struct bridge_object *obj,
+                                     struct focus_strings *str)
+{
+    DWORD_PTR count = 0, item = (DWORD_PTR)-1;
+
+    obj->selected_count = obj->selected_listed = 0;
+    obj->selected_rows = str->selected_rows;
+    if (!SendMessageTimeoutW(hwnd, LVM_GETSELECTEDCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) ||
+        (LONG)count <= 0)
+        return;
+    obj->selected_count = (int)count;
+    while (obj->selected_listed < obj->selected_count &&
+           obj->selected_listed < MAX_SELECTED_ROWS &&
+           SendMessageTimeoutW(hwnd, LVM_GETNEXTITEM, item, LVNI_SELECTED,
+                               SMTO_ABORTIFHUNG, 500, &item) && (int)item >= 0)
+        str->selected_rows[obj->selected_listed++] = (int)item;
+}
+
+/*
  * Role, states and item count of a ListBox or SysListView32 as a whole:
  * focused without a focused item, or the parent of its items. Orca never
  * speaks the role of a focused "list" and says nothing for an unnamed
@@ -1418,6 +1445,7 @@ static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *ob
     {
         obj->role = BRIDGE_ROLE_TABLE;
         obj->columns = str->header_ptrs;
+        describe_table_selection(hwnd, obj, str);
     }
 }
 
@@ -2406,13 +2434,19 @@ static char *dup_utf8(const char *s)
 static void keep_strings(struct bridge_object *obj)
 {
     const char **columns = NULL;
-    int *extents = NULL;
+    int *extents = NULL, *rows = NULL;
     int i;
 
     if (obj->column_count > 0 && obj->column_extents &&
         (extents = HeapAlloc(GetProcessHeap(), 0, obj->column_count * 4 * sizeof(int))))
         memcpy(extents, obj->column_extents, obj->column_count * 4 * sizeof(int));
     obj->column_extents = extents;
+    if (obj->selected_listed > 0 && obj->selected_rows &&
+        (rows = HeapAlloc(GetProcessHeap(), 0, obj->selected_listed * sizeof(int))))
+        memcpy(rows, obj->selected_rows, obj->selected_listed * sizeof(int));
+    else
+        obj->selected_listed = 0;
+    obj->selected_rows = rows;
     obj->name = dup_utf8(obj->name);
     obj->value = dup_utf8(obj->value);
     obj->window_class = dup_utf8(obj->window_class);
@@ -2441,6 +2475,7 @@ static void free_kept_strings(struct bridge_object *obj)
         HeapFree(heap, 0, (char *)obj->columns[i]);
     HeapFree(heap, 0, (void *)obj->columns);
     HeapFree(heap, 0, (void *)obj->column_extents);
+    HeapFree(heap, 0, (void *)obj->selected_rows);
 }
 
 /*

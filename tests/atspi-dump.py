@@ -31,7 +31,7 @@ def details(obj):
             parts.append(label)
     action = obj.get_action_iface()
     if action is not None:
-        names = [Atspi.Action.get_name(action, i)
+        names = [Atspi.Action.get_action_name(action, i)
                  for i in range(Atspi.Action.get_n_actions(action))]
         parts.append("actions=" + ",".join(names))
     return " " + " ".join(parts) if parts else ""
@@ -50,7 +50,37 @@ def describe(obj):
         line += details(obj)
         if obj.get_role() in (Atspi.Role.TEXT, Atspi.Role.ENTRY, Atspi.Role.TERMINAL):
             line += text_lines(obj)
+        if obj.get_table_iface() is not None and obj.get_selection_iface() is not None:
+            line += table_view(obj)
     return line
+
+
+def cell_coordinates(table, cell):
+    """Row and column of cell from its index in parent, as Orca's flat review does."""
+    if cell is None:
+        return (-1, -1)
+    index = cell.get_index_in_parent()
+    return (Atspi.Table.get_row_at_index(table, index),
+            Atspi.Table.get_column_at_index(table, index))
+
+
+def table_view(table):
+    """Selected rows, then the visible cell range Orca's flat review finds
+    from the cells at the table's corners (_get_visible_cell_range)."""
+    rows = Atspi.Table.get_selected_rows(table)
+    count = Atspi.Selection.get_n_selected_children(table)
+    names = []
+    for i in range(count):
+        child = Atspi.Selection.get_selected_child(table, i)
+        names.append(child.get_name() if child is not None else None)
+    r = Atspi.Component.get_extents(table, Atspi.CoordType.WINDOW)
+    first = Atspi.Component.get_accessible_at_point(
+        table, r.x + 1, r.y + 1, Atspi.CoordType.WINDOW)
+    last = Atspi.Component.get_accessible_at_point(
+        table, r.x + r.width - 1, r.y + r.height - 1, Atspi.CoordType.WINDOW)
+    return "\n    selected rows=%s children=%r\n    visible cells %s %r .. %s %r" % (
+        list(rows), names, cell_coordinates(table, first), first and first.get_name(),
+        cell_coordinates(table, last), last and last.get_name())
 
 
 def text_lines(obj):
@@ -109,7 +139,7 @@ def click(name, pattern):
             print("click %r: no Action" % name)
             return
         for j in range(Atspi.Action.get_n_actions(action)):
-            if Atspi.Action.get_name(action, j) == "click":
+            if Atspi.Action.get_action_name(action, j) == "click":
                 print("click %r: %s" % (name, Atspi.Action.do_action(action, j)))
                 return
         print("click %r: no click action" % name)

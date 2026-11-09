@@ -353,6 +353,31 @@ static const char introspection_xml[] =
     "   <arg direction='out' type='b'/>"
     "  </method>"
     " </interface>"
+    " <interface name='org.a11y.atspi.Selection'>"
+    "  <property name='NSelectedChildren' type='i' access='read'/>"
+    "  <method name='GetSelectedChild'>"
+    "   <arg direction='in' name='selectedChildIndex' type='i'/>"
+    "   <arg direction='out' type='(so)'/>"
+    "  </method>"
+    "  <method name='SelectChild'>"
+    "   <arg direction='in' name='childIndex' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='DeselectSelectedChild'>"
+    "   <arg direction='in' name='selectedChildIndex' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='IsChildSelected'>"
+    "   <arg direction='in' name='childIndex' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    "  <method name='SelectAll'><arg direction='out' type='b'/></method>"
+    "  <method name='ClearSelection'><arg direction='out' type='b'/></method>"
+    "  <method name='DeselectChild'>"
+    "   <arg direction='in' name='childIndex' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    " </interface>"
     "</node>";
 
 #define IFACE_ACCESSIBLE "org.a11y.atspi.Accessible"
@@ -363,6 +388,7 @@ static const char introspection_xml[] =
 #define IFACE_VALUE "org.a11y.atspi.Value"
 #define IFACE_COMPONENT "org.a11y.atspi.Component"
 #define IFACE_ACTION "org.a11y.atspi.Action"
+#define IFACE_SELECTION "org.a11y.atspi.Selection"
 #define ACTION_CLICK "click"
 
 /* AtspiCoordType */
@@ -408,6 +434,10 @@ struct node
     char **headers;
     gint row;
     gint column;
+    /* Table: selected rows, the first selected_listed of them known. */
+    gint selected_count;
+    gint selected_listed;
+    gint *selected_rows;
     /* Value interface of a slider, progress bar or spin button, if has_range. */
     gboolean has_range;
     gdouble minimum;
@@ -792,7 +822,7 @@ static GVariant *action_method(struct node *node, const char *method, GVariant *
 
 static const char *const *node_interfaces(struct node *node, guint *count)
 {
-    static const char *ifaces[5];
+    static const char *ifaces[6];
 
     *count = 0;
     ifaces[(*count)++] = IFACE_ACCESSIBLE;
@@ -805,7 +835,10 @@ static const char *const *node_interfaces(struct node *node, guint *count)
     if (node->has_range)
         ifaces[(*count)++] = IFACE_VALUE;
     if (node->role == BRIDGE_ROLE_TABLE)
+    {
         ifaces[(*count)++] = IFACE_TABLE;
+        ifaces[(*count)++] = IFACE_SELECTION;
+    }
     else if (node->role == BRIDGE_ROLE_TABLE_CELL)
         ifaces[(*count)++] = IFACE_TABLE_CELL;
     else if (node->chars)
@@ -865,16 +898,53 @@ static gint cell_index(struct node *table, gint row, gint column)
 }
 
 /*
- * Only rows that had focus are known, and their state may be old, so
- * the selection is told per row and the lists of selected rows stay
- * empty rather than wrong.
+ * The Win32 side lists the first selected rows; beyond them a row is
+ * selected if its cell says so, which is known only for rows that were
+ * described.
  */
 static gboolean row_selected(struct node *table, gint row)
 {
-    gint index = cell_index(table, row, 0);
+    gint index = cell_index(table, row, 0), i;
     struct node *cell = index >= 0 ? table->children->pdata[index] : NULL;
 
+    if (index < 0)
+        return FALSE;
+    for (i = 0; i < table->selected_listed; i++)
+        if (table->selected_rows[i] == row)
+            return TRUE;
+    if (table->selected_listed == table->selected_count)
+        return FALSE;
     return cell && (cell->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED));
+}
+
+/*
+ * Selection of a table, as GTK 3's tree view gives it: the selected
+ * children are the first cells of the selected rows. Orca's flat review
+ * reads only the visible cells of a table with Table and Selection
+ * (ax_utilities.py, _get_on_screen_objects). Changing the selection is
+ * not supported.
+ */
+static GVariant *selection_method(struct node *node, const char *method, GVariant *params)
+{
+    gint index = -1, n = node->column_count;
+
+    if (g_variant_is_of_type(params, G_VARIANT_TYPE("(i)")))
+        g_variant_get(params, "(i)", &index);
+    if (!g_strcmp0(method, "GetSelectedChild"))
+    {
+        gint cell = index >= 0 && index < node->selected_listed ?
+                    cell_index(node, node->selected_rows[index], 0) : -1;
+
+        return g_variant_new("(@(so))", cell >= 0 ? node_ref(child_at(node, cell)) : null_ref());
+    }
+    if (!g_strcmp0(method, "IsChildSelected"))
+        return g_variant_new("(b)", n && index >= n && index < (gint)node->children->len &&
+                                    row_selected(node, index / n - 1));
+    if (!g_strcmp0(method, "SelectChild") || !g_strcmp0(method, "DeselectSelectedChild") ||
+        !g_strcmp0(method, "SelectAll") || !g_strcmp0(method, "ClearSelection") ||
+        !g_strcmp0(method, "DeselectChild"))
+        return g_variant_new("(b)", FALSE);
+    return NULL;
 }
 
 static GVariant *table_method(struct node *node, const char *method, GVariant *params)
@@ -909,7 +979,17 @@ static GVariant *table_method(struct node *node, const char *method, GVariant *p
     if (!g_strcmp0(method, "GetColumnHeader"))
         return g_variant_new("(@(so))", a >= 0 && a < n && a < len ?
                                         node_ref(child_at(node, a)) : null_ref());
-    if (!g_strcmp0(method, "GetSelectedRows") || !g_strcmp0(method, "GetSelectedColumns"))
+    if (!g_strcmp0(method, "GetSelectedRows"))
+    {
+        GVariantBuilder rows;
+        gint i;
+
+        g_variant_builder_init(&rows, G_VARIANT_TYPE("ai"));
+        for (i = 0; i < node->selected_listed; i++)
+            g_variant_builder_add(&rows, "i", node->selected_rows[i]);
+        return g_variant_new("(ai)", &rows);
+    }
+    if (!g_strcmp0(method, "GetSelectedColumns"))
         return g_variant_new("(@ai)", g_variant_new_array(G_VARIANT_TYPE_INT32, NULL, 0));
     if (!g_strcmp0(method, "IsRowSelected"))
         return g_variant_new("(b)", row_selected(node, a));
@@ -971,6 +1051,82 @@ static void coord_origin(struct node *node, guint coord_type, gint *x, gint *y)
     }
 }
 
+static gboolean rect_contains(struct node *node, gint x, gint y)
+{
+    return node->has_extents && x >= node->x && x < node->x + node->width &&
+           y >= node->y && y < node->y + node->height;
+}
+
+/* Distance of the point x, y (screen) from node's rectangle, 0 inside it. */
+static gint rect_distance(struct node *node, gint x, gint y)
+{
+    gint dx = MAX(MAX(node->x - x, x - (node->x + node->width - 1)), 0);
+    gint dy = MAX(MAX(node->y - y, y - (node->y + node->height - 1)), 0);
+
+    return dx + dy;
+}
+
+/*
+ * A child on screen, for hit testing; no placeholders are made. The other
+ * cells of a table row stay placeholders but get their rectangles from
+ * set_row.
+ */
+static gboolean is_hit_candidate(struct node *child)
+{
+    return child && child->has_extents &&
+           (child->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING));
+}
+
+/*
+ * The cell of a table at x, y (screen). Orca finds a table's visible
+ * cells by the cells at its top left and bottom right corners
+ * (ax_utilities_table.py, _get_visible_cell_range), which lie in the
+ * column headers or below the last row, so a point elsewhere in the table
+ * gives the nearest visible cell; a header would end the search. A cell
+ * counts only if its row's first cell is on screen: the other cells of a
+ * row scrolled away keep their old rectangles (set_row).
+ */
+static struct node *table_cell_at_point(struct node *table, gint x, gint y)
+{
+    struct node *best = NULL;
+    gint n = table->column_count, best_distance = G_MAXINT, i;
+
+    if (!n || !rect_contains(table, x, y))
+        return NULL;
+    for (i = n; i < (gint)table->children->len; i++)
+    {
+        struct node *cell = table->children->pdata[i], *first = table->children->pdata[i - i % n];
+        gint distance;
+
+        if (!is_hit_candidate(cell) || !is_hit_candidate(first) || first->placeholder)
+            continue;
+        if ((distance = rect_distance(cell, x, y)) < best_distance)
+        {
+            best = cell;
+            best_distance = distance;
+        }
+        if (!distance)
+            break;
+    }
+    return best;
+}
+
+static struct node *child_at_point(struct node *node, gint x, gint y)
+{
+    guint i;
+
+    if (node->role == BRIDGE_ROLE_TABLE)
+        return table_cell_at_point(node, x, y);
+    for (i = 0; i < node->children->len; i++)
+    {
+        struct node *child = node->children->pdata[i];
+
+        if (is_hit_candidate(child) && rect_contains(child, x, y))
+            return child;
+    }
+    return NULL;
+}
+
 static GVariant *component_method(struct node *node, const char *method, GVariant *params)
 {
     gint x, y, ox, oy;
@@ -1000,7 +1156,14 @@ static GVariant *component_method(struct node *node, const char *method, GVarian
                                     y >= node->y && y < node->y + node->height);
     }
     if (!g_strcmp0(method, "GetAccessibleAtPoint"))
-        return g_variant_new("(@(so))", null_ref());
+    {
+        struct node *child;
+
+        g_variant_get(params, "(iiu)", &x, &y, &coord_type);
+        coord_origin(node, coord_type, &ox, &oy);
+        child = child_at_point(node, x + ox, y + oy);
+        return g_variant_new("(@(so))", child ? node_ref(child) : null_ref());
+    }
     if (!g_strcmp0(method, "GetLayer"))
         return g_variant_new("(u)", node->parent && !node->parent->parent ? LAYER_WINDOW
                                                                           : LAYER_WIDGET);
@@ -1032,6 +1195,8 @@ static void method_call(GDBusConnection *conn, const char *sender,
         ret = component_method(node, method, params);
     else if (!g_strcmp0(iface, IFACE_ACTION))
         ret = action_method(node, method, params);
+    else if (!g_strcmp0(iface, IFACE_SELECTION))
+        ret = selection_method(node, method, params);
     else if (!g_strcmp0(method, "GetChildAtIndex"))
     {
         gint index;
@@ -1166,7 +1331,9 @@ static GVariant *get_property(GDBusConnection *conn, const char *sender,
         return g_variant_new_int32(node->column_count);
     if (!g_strcmp0(prop, "Caption") || !g_strcmp0(prop, "Summary"))
         return null_ref();
-    if (!g_strcmp0(prop, "NSelectedRows") || !g_strcmp0(prop, "NSelectedColumns"))
+    if (!g_strcmp0(prop, "NSelectedRows") || !g_strcmp0(prop, "NSelectedChildren"))
+        return g_variant_new_int32(node->selected_count);
+    if (!g_strcmp0(prop, "NSelectedColumns"))
         return g_variant_new_int32(0);
     if (!g_strcmp0(prop, "ColumnSpan") || !g_strcmp0(prop, "RowSpan"))
         return g_variant_new_int32(1);
@@ -1312,14 +1479,24 @@ static void node_free(struct node *node)
     g_free(node->shortcut);
     g_free(node->chars);
     g_strfreev(node->headers);
+    g_free(node->selected_rows);
     g_free(node);
 }
 
 static void node_remove(struct node *node)
 {
     struct node *parent = node->parent;
-    gint index = index_in_parent(node);
+    gint index = index_in_parent(node), n, i;
 
+    /*
+     * The first cell of a table row takes the other cells along: they live
+     * by its description (set_row) and would keep their old rectangles.
+     */
+    if (parent && parent->role == BRIDGE_ROLE_TABLE && (n = parent->column_count) &&
+        index >= n && index % n == 0)
+        for (i = index + n - 1; i > index; i--)
+            if (i < (gint)parent->children->len && parent->children->pdata[i])
+                node_remove(parent->children->pdata[i]);
     if (parent && index >= 0)
     {
         /* An item list keeps its slots, see is_item_list. */
@@ -1387,8 +1564,9 @@ static void sync_items(struct node *list)
 }
 
 /*
- * Copies the columns of obj; for a table, its header texts. Slots laid
- * out for another role or column count are dropped first.
+ * Copies the columns of obj; for a table, its header texts and selected
+ * rows. Slots laid out for another role or column count are dropped
+ * first.
  */
 static void set_columns(struct node *node, const struct bridge_object *obj)
 {
@@ -1400,8 +1578,17 @@ static void set_columns(struct node *node, const struct bridge_object *obj)
     node->column_count = obj->column_count;
     g_strfreev(node->headers);
     node->headers = NULL;
+    g_free(node->selected_rows);
+    node->selected_rows = NULL;
+    node->selected_count = node->selected_listed = 0;
     if (obj->role != BRIDGE_ROLE_TABLE)
         return;
+    node->selected_count = obj->selected_count;
+    if (obj->selected_listed > 0 && obj->selected_rows)
+    {
+        node->selected_listed = obj->selected_listed;
+        node->selected_rows = g_memdup2(obj->selected_rows, obj->selected_listed * sizeof(int));
+    }
     node->headers = g_new0(char *, obj->column_count + 1);
     for (i = 0; i < obj->column_count; i++)
     {
@@ -2146,6 +2333,7 @@ static void free_object(struct bridge_object *obj)
     g_free((char *)obj->text);
     g_strfreev((char **)obj->columns);
     g_free((int *)obj->column_extents);
+    g_free((int *)obj->selected_rows);
 }
 
 static void free_update(gpointer data)
@@ -2199,6 +2387,11 @@ static void copy_object(struct bridge_object *dst, const struct bridge_object *s
         dst->column_count = 0;
     if (!dst->columns)
         dst->column_extents = NULL;
+    dst->selected_rows = NULL;
+    if (src->selected_listed > 0 && src->selected_rows)
+        dst->selected_rows = g_memdup2(src->selected_rows, src->selected_listed * sizeof(int));
+    else
+        dst->selected_listed = 0;
 }
 
 static void post(GSourceFunc func, gpointer data, GDestroyNotify free_func)

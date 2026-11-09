@@ -28,7 +28,7 @@ sleep 2
 # Tab to "Empty:": the list itself, list box with setsize 0.
 # Tab to "Colors:" (extended selection): Down, then shift+down must select
 # 'Blue' as well.
-# Tab to "Files:" (report view): the table itself, 3x3, no focused row;
+# Tab to "Files:" (report view): the table itself, 8x3, no focused row;
 # Down must focus cell 'readme.txt' 0,0 with row ['readme.txt', '2 KB',
 # 'Text'] and headers ['Name', 'Size', 'Type'], Down then 'notes.md'.
 # Tab to "Places:" (tree): Wine selects the first item, so focus on tree

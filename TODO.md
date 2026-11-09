@@ -37,17 +37,7 @@ Implementation, as far as seen now:
   (`LVM_GETITEMRECT`, `TVM_GETITEMRECT`, `TCM_GETITEMRECT`,
   `LB_GETITEMRECT`; check what this changes for Orca's progress bar
   rule, see `CLAUDE.md`).
-- `Selection` and `Component.GetAccessibleAtPoint` for a table (list
-  view in report view). Without `Selection`, Orca's flat review walks a
-  table child by child, every row times every column over D-Bus. With
-  `Table` plus `Selection` it reads only the visible cells
-  (`iter_visible_cells` in `ax_utilities_table.py`), found by
-  `get_descendant_at_point` at the table's top left and bottom right
-  corners. Selected rows from `LVM_GETNEXTITEM` with `LVNI_SELECTED`,
-  posted with the table; `GetSelectedRows` and `GetSelectedChild` could
-  then be answered too (now empty). Check first what else in Orca changes
-  once a table has `Selection` (`get_selected_cell_coordinates_range`,
-  selection announcements).
+- `Selection` for list boxes and trees, as GTK gives it; tables have it.
 - `Action` for other objects than buttons (list items, tabs, combo
   boxes), if Orca's mouse click fallback is not good enough.
 - Check first in the Orca source what the text side of flat review needs
