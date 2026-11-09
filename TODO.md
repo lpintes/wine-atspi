@@ -50,8 +50,6 @@ Implementation, as far as seen now:
   selection announcements).
 - `Action` with "click" for buttons and similar (`BM_CLICK`), so that
   activation works without moving the mouse.
-- Text extents for `Edit` / RichEdit (`EM_POSFROMCHAR`) and the console
-  (cell size from the window).
 - Check first in the Orca source what the text side of flat review needs
   exactly, and what Orca does with an object outside the focus's
   application.

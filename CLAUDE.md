@@ -534,6 +534,11 @@ Found with Wine console windows (`build/exp-console/`,
   after Return (`treat_event_as_command`, extended to whole lines) and
   delays printable key echo until the text appears. Confirmed with Orca
   (2026-11-09): typing, command output, caret moves and Backspace.
+- Flat review of a console: `GetCurrentConsoleFont` (attached) gives
+  conhost's cell size in pixels, and cell (x, y) is drawn at client
+  ((x - srWindow.Left) * width, (y - srWindow.Top) * height)
+  (`programs/conhost/window.c`). `describe_console` saves this view for
+  `console_text_extents`. Confirmed with Orca (2026-11-09).
 
 ## Open questions (to verify by experiment)
 
