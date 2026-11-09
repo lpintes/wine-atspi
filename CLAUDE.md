@@ -652,6 +652,11 @@ Found with Wine console windows (`build/exp-console/`,
     `run-gnome` or `run-mate`.
   - In WSL the image can be mounted at `/mnt/arch`. Never write to it while
     QEMU runs.
+  - Into a running VM copy with `bash build/copy-to-vm.sh` from Git Bash
+    (untracked helper; `scp` to `~/wine-atspi`). It uses the host alias
+    `arch-vm` in `~/.ssh/config`: key `~/.ssh/arch-vm` without passphrase,
+    installed in the image. The main `id_rsa` has a passphrase and no agent
+    runs, so it cannot be used from here.
   - Final checks: native boot through `restart-do-archu.cmd`.
 - **Keep the Wine version identical** in WSL and in the image
   (`pacman -Q wine` on both). A Winelib binary is tied to the Wine it was
