@@ -1635,8 +1635,6 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
             item_at(parent, obj->child - 1);
     }
     node = g_hash_table_lookup(app->nodes, id);
-    if (node)
-        node->hwnd = obj->hwnd;
     if (node && !node->placeholder)
         update_node(node, obj);
     else
@@ -1664,6 +1662,7 @@ static struct node *get_node(struct app *app, const struct bridge_object *obj,
         set_range(node, obj, FALSE);
         set_extents(node, obj);
     }
+    node->hwnd = obj->hwnd;
     sync_items(node);
     g_free(id);
     return node;

@@ -651,6 +651,9 @@ static int text_line_end(HWND hwnd, int index, int len, int height)
     return last.x + height / 2;
 }
 
+static int console_text_extents(HWND hwnd, const unsigned int *chars, int count,
+                                int start, int end, int *rect);
+
 int bridge_text_extents(unsigned long long handle, const unsigned int *chars, int count,
                         int start, int end, int *rect)
 {
@@ -661,8 +664,11 @@ int bridge_text_extents(unsigned long long handle, const unsigned int *chars, in
     RECT client, r;
     POINT pt;
 
-    if (!chars || !hwnd || !IsWindow(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
-        !has_edit_text(cls))
+    if (!chars || !hwnd || !IsWindow(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)))
+        return 0;
+    if (!lstrcmpW(cls, L"WineConsoleClass"))
+        return console_text_extents(hwnd, chars, count, start, end, rect);
+    if (!has_edit_text(cls))
         return 0;
     rich = lstrcmpiW(cls, L"Edit") != 0;
     start = max(start, 0);
@@ -1717,6 +1723,22 @@ static struct
     DWORD pid;
 } console_client;
 
+/*
+ * Where the text of the last read console lies, for text extents asked on
+ * the AT-SPI thread: line 0 of the text is buffer row first_row, the
+ * window shows the buffer cells window, and cell (x, y) is drawn at client
+ * ((x - window.Left) * cell.X, (y - window.Top) * cell.Y) (conhost's
+ * window.c).
+ */
+static struct
+{
+    HWND hwnd;
+    int first_row;
+    SMALL_RECT window;
+    COORD cell;
+} console_view;
+static SRWLOCK console_view_lock = SRWLOCK_INIT;
+
 static BOOL is_console(HWND hwnd)
 {
     WCHAR cls[64];
@@ -1809,6 +1831,7 @@ static DWORD attach_console_window(HWND hwnd)
 static BOOL describe_console(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
 {
     CONSOLE_SCREEN_BUFFER_INFO info;
+    CONSOLE_FONT_INFO font = { 0 };
     COORD origin = { 0, 0 };
     WCHAR *cells = NULL, *buf = NULL;
     HANDLE out;
@@ -1831,6 +1854,7 @@ static BOOL describe_console(HWND hwnd, struct bridge_object *obj, struct focus_
         cells = HeapAlloc(GetProcessHeap(), 0, width * rows * sizeof(WCHAR));
         if (cells)
             ok = ReadConsoleOutputCharacterW(out, cells, width * rows, origin, &read);
+        GetCurrentConsoleFont(out, FALSE, &font);
     }
     if (out != INVALID_HANDLE_VALUE)
         CloseHandle(out);
@@ -1844,6 +1868,13 @@ static BOOL describe_console(HWND hwnd, struct bridge_object *obj, struct focus_
     }
     for (len = read; len < width * rows; len++)
         cells[len] = ' ';
+
+    AcquireSRWLockExclusive(&console_view_lock);
+    console_view.hwnd = hwnd;
+    console_view.first_row = origin.Y;
+    console_view.window = info.srWindow;
+    console_view.cell = font.dwFontSize;
+    ReleaseSRWLockExclusive(&console_view_lock);
 
     cursor_row = info.dwCursorPosition.Y - origin.Y;
     for (y = 0; y < rows; y++)
@@ -1891,6 +1922,77 @@ static BOOL describe_console(HWND hwnd, struct bridge_object *obj, struct focus_
     HeapFree(GetProcessHeap(), 0, buf);
     get_extents(hwnd, obj);
     return TRUE;
+}
+
+/*
+ * Text extents of the console text from describe_console, through the
+ * view saved there. A range outside the window lies TEXT_FAR_AWAY above
+ * or below it, as for an Edit. Each UTF-16 unit is taken as one cell.
+ */
+static int console_text_extents(HWND hwnd, const unsigned int *chars, int count,
+                                int start, int end, int *rect)
+{
+    int i, line = 0, col = 0, first_line = 0, first_col = 0, top, bottom, cols;
+    SMALL_RECT win;
+    COORD cell;
+    RECT r;
+
+    AcquireSRWLockShared(&console_view_lock);
+    i = console_view.hwnd == hwnd;
+    top = console_view.first_row;
+    win = console_view.window;
+    cell = console_view.cell;
+    ReleaseSRWLockShared(&console_view_lock);
+    start = max(start, 0);
+    end = min(end, count);
+    if (!i || cell.X <= 0 || cell.Y <= 0 || start >= end)
+        return 0;
+
+    for (i = 0; i < end; i++)
+    {
+        if (i == start)
+        {
+            first_line = line;
+            first_col = col;
+        }
+        if (i == end - 1)
+            break;
+        if (chars[i] == '\n')
+        {
+            line++;
+            col = 0;
+        }
+        else
+            col += chars[i] > 0xffff ? 2 : 1;
+    }
+    /* The last character, a line break included, takes one cell (two if astral). */
+    col += chars[end - 1] > 0xffff ? 2 : 1;
+
+    bottom = top + line;
+    top += first_line;
+    cols = win.Right - win.Left + 1;
+    if (bottom < win.Top || top > win.Bottom)
+    {
+        r.left = r.right = 0;
+        r.top = bottom < win.Top ? -TEXT_FAR_AWAY : TEXT_FAR_AWAY;
+        r.bottom = r.top + cell.Y;
+        client_to_screen(hwnd, r, rect);
+        return 1;
+    }
+    r.top = (max(top, win.Top) - win.Top) * cell.Y;
+    r.bottom = (min(bottom, win.Bottom) - win.Top + 1) * cell.Y;
+    if (line != first_line)
+    {
+        r.left = 0;
+        r.right = cols * cell.X;
+    }
+    else
+    {
+        r.left = min(max(first_col - win.Left, 0), cols) * cell.X;
+        r.right = min(max(col - win.Left, 0), cols) * cell.X;
+    }
+    client_to_screen(hwnd, r, rect);
+    return 1;
 }
 
 /*

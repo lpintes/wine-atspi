@@ -40,7 +40,7 @@ def describe(obj):
         line += " text=%r" % (Atspi.Text.get_text(text, 0, -1) if text else None)
     if VERBOSE and obj.get_role() != Atspi.Role.APPLICATION:
         line += details(obj)
-        if obj.get_role() in (Atspi.Role.TEXT, Atspi.Role.ENTRY):
+        if obj.get_role() in (Atspi.Role.TEXT, Atspi.Role.ENTRY, Atspi.Role.TERMINAL):
             line += text_lines(obj)
     return line
 
