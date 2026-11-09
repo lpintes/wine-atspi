@@ -566,6 +566,20 @@ Found with Wine console windows (`build/exp-console/`,
   (`programs/conhost/window.c`). `describe_console` saves this view for
   `console_text_extents`. Confirmed with Orca (2026-11-09).
 
+Found in the Arch image without the bridge (`build/exp-focus/focus-test.py`,
+XTest keys, Wine 11.21, 2026-11-09).
+
+- Under MATE (marco, X11), closing notepad with unsaved text (Alt+F4, then
+  No) leaves X input focus on `None` and `_NET_ACTIVE_WINDOW` on the
+  destroyed message box. X drops every key, Alt+Tab included, and Orca
+  says it cannot determine the location. It happens only when the message
+  box and its owner go away together: an empty notepad, Cancel in the box
+  and a GTK window all hand focus on normally. GNOME (Wayland, Wine under
+  Xwayland) does not have the problem (checked by hand with Orca). Not a
+  bridge bug. Recovery over ssh: ask the window manager to activate
+  another window (`_NET_ACTIVE_WINDOW`, e.g. GdkX11
+  `X11Window.foreign_new_for_display(...).focus(0)`).
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
