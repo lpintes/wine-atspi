@@ -48,8 +48,8 @@ Implementation, as far as seen now:
   then be answered too (now empty). Check first what else in Orca changes
   once a table has `Selection` (`get_selected_cell_coordinates_range`,
   selection announcements).
-- `Action` with "click" for buttons and similar (`BM_CLICK`), so that
-  activation works without moving the mouse.
+- `Action` for other objects than buttons (list items, tabs, combo
+  boxes), if Orca's mouse click fallback is not good enough.
 - Check first in the Orca source what the text side of flat review needs
   exactly, and what Orca does with an object outside the focus's
   application.

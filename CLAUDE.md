@@ -386,6 +386,19 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   below the window. The review context is rebuilt after any other key
   or a caret move of the reviewed object. Confirmed with Orca in
   notepad and wordpad (2026-11-09).
+- Object navigator (`object_navigator_command_definitions.py`):
+  Orca+Ctrl+arrows move, Orca+Ctrl+Return activates, Orca+Shift+A lists
+  the object's actions. Activation tries the actions click, press, jump,
+  open and activate (`try_all_clickable_actions` in
+  `ax_event_synthesizer.py`), else a mouse click at the centre of the
+  extents. A "click" action also keeps an object out of the layout-only
+  ones and makes it a flat review zone when it has nothing below. The
+  bridge gives Win32 buttons (push button, check box, radio button) the
+  action "click", which posts `BM_CLICK` (`bridge_click`); Wine's
+  `BM_CLICK` sends `WM_LBUTTONDOWN` / `WM_LBUTTONUP`
+  (`user32/button.c`), so the button gets focus and notifies
+  `BN_CLICKED`. Confirmed with Orca in the Arch image (2026-11-09); in
+  WSLg the navigator keys did not work (legacy device).
 
 Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
 

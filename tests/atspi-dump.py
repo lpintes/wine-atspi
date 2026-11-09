@@ -2,9 +2,12 @@
 """Dump the AT-SPI desktop: one line per application, then its subtree.
 
 Usage: tests/atspi-dump.py [-v] [APP_NAME_SUBSTRING]
+       tests/atspi-dump.py --click NAME APP_NAME_SUBSTRING
 Without an argument all applications are listed without subtrees.
 With -v each object also shows its rect in window coordinates, as Orca's
-flat review asks for it, and its showing and focused states.
+flat review asks for it, its showing and focused states and its actions.
+With --click the first object named NAME gets its "click" action, as
+Orca's object navigator does it, and the result is printed.
 """
 import sys
 
@@ -26,6 +29,11 @@ def details(obj):
                          (Atspi.StateType.FOCUSED, "focused")):
         if states.contains(state):
             parts.append(label)
+    action = obj.get_action_iface()
+    if action is not None:
+        names = [Atspi.Action.get_name(action, i)
+                 for i in range(Atspi.Action.get_n_actions(action))]
+        parts.append("actions=" + ",".join(names))
     return " " + " ".join(parts) if parts else ""
 
 
@@ -76,9 +84,45 @@ def dump(obj, depth):
             dump(child, depth + 1)
 
 
+def find(obj, name):
+    if obj.get_role() != Atspi.Role.APPLICATION and obj.get_name() == name:
+        return obj
+    for i in range(obj.get_child_count()):
+        child = obj.get_child_at_index(i)
+        found = find(child, name) if child is not None else None
+        if found is not None:
+            return found
+    return None
+
+
+def click(name, pattern):
+    desktop = Atspi.get_desktop(0)
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        if app is None or pattern not in (app.get_name() or ""):
+            continue
+        obj = find(app, name)
+        if obj is None:
+            continue
+        action = obj.get_action_iface()
+        if action is None:
+            print("click %r: no Action" % name)
+            return
+        for j in range(Atspi.Action.get_n_actions(action)):
+            if Atspi.Action.get_name(action, j) == "click":
+                print("click %r: %s" % (name, Atspi.Action.do_action(action, j)))
+                return
+        print("click %r: no click action" % name)
+        return
+    print("click %r: not found" % name)
+
+
 def main():
     global VERBOSE
     args = sys.argv[1:]
+    if len(args) == 3 and args[0] == "--click":
+        click(args[1], args[2])
+        return
     if args and args[0] == "-v":
         VERBOSE = True
         args = args[1:]

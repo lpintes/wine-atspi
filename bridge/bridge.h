@@ -290,4 +290,11 @@ void atspi_post_app_gone(unsigned int pid);
 int bridge_text_extents(unsigned long long hwnd, const unsigned int *chars, int count,
                         int start, int end, int *rect);
 
+/*
+ * Clicks the button hwnd (push button, check box, radio button) as a
+ * mouse click would, without moving the mouse. Does not wait for the
+ * program to handle it. Returns 0 if hwnd is no enabled button.
+ */
+int bridge_click(unsigned long long hwnd);
+
 #endif

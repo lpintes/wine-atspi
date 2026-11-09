@@ -329,6 +329,30 @@ static const char introspection_xml[] =
     "  <method name='GrabFocus'><arg direction='out' type='b'/></method>"
     "  <method name='GetAlpha'><arg direction='out' type='d'/></method>"
     " </interface>"
+    " <interface name='org.a11y.atspi.Action'>"
+    "  <property name='NActions' type='i' access='read'/>"
+    "  <method name='GetDescription'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='GetName'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='GetLocalizedName'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='GetKeyBinding'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='s'/>"
+    "  </method>"
+    "  <method name='GetActions'><arg direction='out' type='a(sss)'/></method>"
+    "  <method name='DoAction'>"
+    "   <arg direction='in' name='index' type='i'/>"
+    "   <arg direction='out' type='b'/>"
+    "  </method>"
+    " </interface>"
     "</node>";
 
 #define IFACE_ACCESSIBLE "org.a11y.atspi.Accessible"
@@ -338,6 +362,8 @@ static const char introspection_xml[] =
 #define IFACE_TABLE_CELL "org.a11y.atspi.TableCell"
 #define IFACE_VALUE "org.a11y.atspi.Value"
 #define IFACE_COMPONENT "org.a11y.atspi.Component"
+#define IFACE_ACTION "org.a11y.atspi.Action"
+#define ACTION_CLICK "click"
 
 /* AtspiCoordType */
 enum { COORD_SCREEN, COORD_WINDOW, COORD_PARENT };
@@ -728,9 +754,45 @@ static GVariant *text_method(struct node *node, const char *method, GVariant *pa
  * Interfaces of node, the first always Accessible. The array is valid
  * until the next call; only the AT-SPI thread calls this.
  */
+/*
+ * A Win32 button (push button, check box, radio button) has the one action
+ * "click", so that Orca's object navigator and flat review can activate it
+ * without the mouse (try_all_clickable_actions).
+ */
+static gboolean node_has_click(struct node *node)
+{
+    return node->hwnd && !node->placeholder && node->window_class &&
+           !g_ascii_strcasecmp(node->window_class, "Button") &&
+           (node->role == BRIDGE_ROLE_PUSH_BUTTON || node->role == BRIDGE_ROLE_CHECK_BOX ||
+            node->role == BRIDGE_ROLE_RADIO_BUTTON);
+}
+
+static GVariant *action_method(struct node *node, const char *method, GVariant *params)
+{
+    gint index = -1;
+
+    if (!g_strcmp0(method, "GetActions"))
+    {
+        GVariantBuilder b;
+
+        g_variant_builder_init(&b, G_VARIANT_TYPE("a(sss)"));
+        g_variant_builder_add(&b, "(sss)", ACTION_CLICK, "", "");
+        return g_variant_new("(a(sss))", &b);
+    }
+    if (g_variant_is_of_type(params, G_VARIANT_TYPE("(i)")))
+        g_variant_get(params, "(i)", &index);
+    if (!g_strcmp0(method, "GetName") || !g_strcmp0(method, "GetLocalizedName"))
+        return g_variant_new("(s)", index == 0 ? ACTION_CLICK : "");
+    if (!g_strcmp0(method, "GetDescription") || !g_strcmp0(method, "GetKeyBinding"))
+        return g_variant_new("(s)", "");
+    if (!g_strcmp0(method, "DoAction"))
+        return g_variant_new("(b)", index == 0 && bridge_click(node->hwnd));
+    return NULL;
+}
+
 static const char *const *node_interfaces(struct node *node, guint *count)
 {
-    static const char *ifaces[4];
+    static const char *ifaces[5];
 
     *count = 0;
     ifaces[(*count)++] = IFACE_ACCESSIBLE;
@@ -750,6 +812,8 @@ static const char *const *node_interfaces(struct node *node, guint *count)
         ifaces[(*count)++] = IFACE_TEXT;
     if (node->has_extents)
         ifaces[(*count)++] = IFACE_COMPONENT;
+    if (node_has_click(node))
+        ifaces[(*count)++] = IFACE_ACTION;
     return ifaces;
 }
 
@@ -966,6 +1030,8 @@ static void method_call(GDBusConnection *conn, const char *sender,
         ret = table_cell_method(node, method);
     else if (!g_strcmp0(iface, IFACE_COMPONENT))
         ret = component_method(node, method, params);
+    else if (!g_strcmp0(iface, IFACE_ACTION))
+        ret = action_method(node, method, params);
     else if (!g_strcmp0(method, "GetChildAtIndex"))
     {
         gint index;
@@ -1088,6 +1154,8 @@ static GVariant *get_property(GDBusConnection *conn, const char *sender,
         return g_variant_new_string("2.1");
     if (!g_strcmp0(prop, "Id"))
         return g_variant_new_int32(node->app->id);
+    if (!g_strcmp0(prop, "NActions"))
+        return g_variant_new_int32(1);
     if (!g_strcmp0(prop, "CharacterCount"))
         return g_variant_new_int32(node->count);
     if (!g_strcmp0(prop, "CaretOffset"))

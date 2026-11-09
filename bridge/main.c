@@ -752,6 +752,23 @@ int bridge_text_extents(unsigned long long handle, const unsigned int *chars, in
     return 1;
 }
 
+int bridge_click(unsigned long long handle)
+{
+    HWND hwnd = (HWND)(ULONG_PTR)handle;
+    WCHAR cls[16];
+
+    if (!hwnd || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"Button") ||
+        (GetWindowLongW(hwnd, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX ||
+        !IsWindowVisible(hwnd) || !IsWindowEnabled(hwnd))
+        return 0;
+    /*
+     * Wine's BM_CLICK sends the button WM_LBUTTONDOWN and WM_LBUTTONUP
+     * (user32/button.c), which focus it and notify BN_CLICKED. Posted,
+     * because the click may open a modal dialog.
+     */
+    return PostMessageW(hwnd, BM_CLICK, 0, 0);
+}
+
 static void get_class(HWND hwnd, WCHAR *cls, int len, char *dst, int size)
 {
     if (!GetClassNameW(hwnd, cls, len))
