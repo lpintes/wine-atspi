@@ -13,6 +13,7 @@
 #include <oleacc.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #include <winternl.h>
 
 #include "bridge.h"
@@ -1413,6 +1414,206 @@ static BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_obje
 }
 
 /*
+ * Wine's console window (conhost.exe, WineConsoleClass) emits no WinEvent
+ * and draws its text with GDI. Like NVDA, the bridge attaches to the
+ * console for a moment, reads the screen buffer and detaches again. The
+ * window is the frame; the terminal inside it is child CONSOLE_CHILD.
+ */
+#define CONSOLE_CLASS L"WineConsoleClass"
+#define CONSOLE_CHILD 1
+/* Screen buffer cells read at most; earlier rows are left out. */
+#define CONSOLE_MAX_CELLS (1 << 18)
+/* Output comes without a key, so a focused console is read this often. */
+#define CONSOLE_POLL_MS 100
+
+/*
+ * AttachConsole needs a process of the console, not conhost.exe itself
+ * (error 6); one is found by trying every process and kept here. It also
+ * names the application.
+ */
+static struct
+{
+    HWND hwnd;
+    DWORD pid;
+} console_client;
+
+static BOOL is_console(HWND hwnd)
+{
+    WCHAR cls[64];
+
+    return GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) && !lstrcmpW(cls, CONSOLE_CLASS);
+}
+
+/* Ctrl+C and Ctrl+Break reach every process attached to the console. */
+static BOOL WINAPI ignore_console_ctrl(DWORD type)
+{
+    return TRUE;
+}
+
+/*
+ * Attaches to the console of window hwnd through process pid. Wine's
+ * AttachConsole replaces the std handles and FreeConsole closes those, so
+ * they are saved here and restored by detach_console.
+ */
+static HANDLE saved_std[3];
+
+static BOOL attach_console(HWND hwnd, DWORD pid)
+{
+    static BOOL prepared;
+    static const DWORD std[3] = { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE };
+    int i;
+
+    if (!prepared)
+    {
+        SetConsoleCtrlHandler(ignore_console_ctrl, TRUE);
+        /* A bridge started from a terminal has a console of its own. */
+        FreeConsole();
+        prepared = TRUE;
+    }
+    for (i = 0; i < 3; i++)
+        saved_std[i] = GetStdHandle(std[i]);
+    if (AttachConsole(pid))
+    {
+        if (GetConsoleWindow() == hwnd)
+            return TRUE;
+        FreeConsole();
+    }
+    for (i = 0; i < 3; i++)
+        SetStdHandle(std[i], saved_std[i]);
+    return FALSE;
+}
+
+static void detach_console(void)
+{
+    FreeConsole();
+    SetStdHandle(STD_INPUT_HANDLE, saved_std[0]);
+    SetStdHandle(STD_OUTPUT_HANDLE, saved_std[1]);
+    SetStdHandle(STD_ERROR_HANDLE, saved_std[2]);
+}
+
+/* Attaches to the console of window hwnd; returns the client pid or 0. */
+static DWORD attach_console_window(HWND hwnd)
+{
+    PROCESSENTRY32W pe;
+    HANDLE snap;
+    DWORD owner = 0;
+    BOOL more;
+
+    if (console_client.hwnd == hwnd && attach_console(hwnd, console_client.pid))
+        return console_client.pid;
+    console_client.hwnd = NULL;
+    GetWindowThreadProcessId(hwnd, &owner);
+    snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE)
+        return 0;
+    pe.dwSize = sizeof(pe);
+    for (more = Process32FirstW(snap, &pe); more; more = Process32NextW(snap, &pe))
+    {
+        if (pe.th32ProcessID == owner || pe.th32ProcessID == GetCurrentProcessId() ||
+            !attach_console(hwnd, pe.th32ProcessID))
+            continue;
+        console_client.hwnd = hwnd;
+        console_client.pid = pe.th32ProcessID;
+        trace(L"console %p: client %lu %s", hwnd, pe.th32ProcessID, pe.szExeFile);
+        break;
+    }
+    CloseHandle(snap);
+    return console_client.hwnd == hwnd ? console_client.pid : 0;
+}
+
+/*
+ * The screen buffer as text: rows without trailing spaces, joined by
+ * "\n", up to the cursor row or the last non-empty row, whichever is
+ * later. The cursor row keeps its spaces up to the cursor.
+ */
+static BOOL describe_console(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
+{
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    COORD origin = { 0, 0 };
+    WCHAR *cells = NULL, *buf = NULL;
+    HANDLE out;
+    DWORD read = 0;
+    int width = 0, rows = 0, cursor_row, y, len, pos = 0, end = 0, caret = 0, size;
+    BOOL ok = FALSE;
+
+    if (!attach_console_window(hwnd))
+        return FALSE;
+    out = CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                      NULL, OPEN_EXISTING, 0, NULL);
+    if (out != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(out, &info) && info.dwSize.X > 0)
+    {
+        width = info.dwSize.X;
+        rows = max(info.dwCursorPosition.Y, info.srWindow.Bottom) + 1;
+        rows = min(rows, info.dwSize.Y);
+        if (width * rows > CONSOLE_MAX_CELLS)
+            origin.Y = rows - CONSOLE_MAX_CELLS / width;
+        rows -= origin.Y;
+        cells = HeapAlloc(GetProcessHeap(), 0, width * rows * sizeof(WCHAR));
+        if (cells)
+            ok = ReadConsoleOutputCharacterW(out, cells, width * rows, origin, &read);
+    }
+    if (out != INVALID_HANDLE_VALUE)
+        CloseHandle(out);
+    detach_console();
+    if (ok)
+        buf = HeapAlloc(GetProcessHeap(), 0, (width + 1) * rows * sizeof(WCHAR));
+    if (!buf)
+    {
+        HeapFree(GetProcessHeap(), 0, cells);
+        return FALSE;
+    }
+    for (len = read; len < width * rows; len++)
+        cells[len] = ' ';
+
+    cursor_row = info.dwCursorPosition.Y - origin.Y;
+    for (y = 0; y < rows; y++)
+    {
+        const WCHAR *row = cells + y * width;
+
+        if (y)
+            buf[pos++] = '\n';
+        for (len = width; len > 0 && row[len - 1] == ' '; len--)
+            ;
+        if (y == cursor_row)
+        {
+            len = max(len, info.dwCursorPosition.X);
+            caret = pos + info.dwCursorPosition.X;
+        }
+        memcpy(buf + pos, row, len * sizeof(WCHAR));
+        pos += len;
+        if (len || y <= cursor_row)
+            end = pos;
+    }
+    buf[end] = 0;
+    HeapFree(GetProcessHeap(), 0, cells);
+
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = CONSOLE_CHILD;
+    obj->role = BRIDGE_ROLE_TERMINAL;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_MULTI_LINE);
+    str->object[0] = 0;
+    obj->name = str->object;
+    obj->value = NULL;
+    obj->caret = obj->selection_start = obj->selection_end = char_offset(buf, end, caret);
+    size = WideCharToMultiByte(CP_UTF8, 0, buf, -1, NULL, 0, NULL, NULL);
+    str->text = HeapAlloc(GetProcessHeap(), 0, size > 0 ? size : 1);
+    if (str->text)
+    {
+        str->text[0] = 0;
+        WideCharToMultiByte(CP_UTF8, 0, buf, -1, str->text, size, NULL, NULL);
+        obj->text = str->text;
+    }
+    HeapFree(GetProcessHeap(), 0, buf);
+    get_extents(hwnd, obj);
+    return TRUE;
+}
+
+/*
  * Fills obj from MSAA and the window class; the strings point into str.
  * FALSE if MSAA failed.
  */
@@ -1435,6 +1636,8 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     obj->columns = NULL;
     obj->has_range = FALSE;
     obj->has_extents = FALSE;
+    if (id_object == OBJID_CLIENT && !lstrcmpW(cls, CONSOLE_CLASS))
+        return describe_console(hwnd, obj, str);
     if (id_object == OBJID_CLIENT && is_tree_view(cls))
     {
         /* Only the caret item can have focus; the child id just names it. */
@@ -1804,6 +2007,30 @@ static struct
     BOOL recovered;     /* reported by check_missed_focus, not by an event */
 } last_focus;
 
+static UINT_PTR console_timer;
+
+/* Reads the focused console again; runs while a console has focus. */
+static void CALLBACK poll_console(HWND unused, UINT msg, UINT_PTR id, DWORD time)
+{
+    struct bridge_object obj;
+    struct focus_strings str;
+    HWND hwnd = last_focus.hwnd;
+
+    if (!hwnd || !is_console(hwnd) || GetForegroundWindow() != hwnd)
+    {
+        KillTimer(NULL, id);
+        console_timer = 0;
+        return;
+    }
+    memset(&obj, 0, sizeof(obj));
+    str.text = NULL;
+    if (!describe_console(hwnd, &obj, &str))
+        return;
+    /* The AT-SPI side announces only what differs from its copy. */
+    atspi_post_update(last_focus.pid, &obj);
+    free_strings(&str);
+}
+
 static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 {
     struct bridge_focus focus;
@@ -1820,9 +2047,13 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
         return;
     describe_frame(top, &focus.frame, &str);
     describe_labels(top, &focus, &str);
-    if (focus.object.child && id_object == OBJID_CLIENT)
+    if (focus.object.child && id_object == OBJID_CLIENT &&
+        focus.object.role != BRIDGE_ROLE_TERMINAL)
         describe_container(hwnd, &focus.container, &str);
     GetWindowThreadProcessId(hwnd, &pid);
+    /* A console window belongs to conhost.exe; the application is its program. */
+    if (focus.object.role == BRIDGE_ROLE_TERMINAL && console_client.hwnd == hwnd)
+        pid = console_client.pid;
     focus.pid = pid;
     get_app_name(pid, str.app, sizeof(str.app));
     focus.app_name = str.app;
@@ -1837,6 +2068,8 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     /* A list view's own focus event stands for its focused item. */
     last_focus.id_child = id_child ? id_child : (LONG)focus.object.child;
     last_focus.pid = pid;
+    if (focus.object.role == BRIDGE_ROLE_TERMINAL && !console_timer)
+        console_timer = SetTimer(NULL, 0, CONSOLE_POLL_MS, poll_console);
 }
 
 /*

@@ -481,6 +481,41 @@ Wine 11.21, 2026-11-08).
   not open the menu (`comctl32/treeview.c` eats `WM_SYSKEYDOWN`);
   Alt+letter works.
 
+Found with Wine console windows (`build/exp-console/`,
+`tests/bridge-console.sh`, Wine 11.21, 2026-11-09).
+
+- `wineconsole cmd` opens a `WineConsoleClass` window owned by
+  `conhost.exe`; its title is the client's exe path. conhost emits no
+  WinEvent at all (no `NotifyWinEvent` in `programs/conhost`). A console
+  program started from a Linux terminal (`wine cmd`) has no window
+  (conhost in tty mode); Orca reads the Linux terminal then.
+- `AttachConsole(conhost pid)` fails (error 6). The client is found by
+  `AttachConsole` on every process of a toolhelp snapshot and comparing
+  `GetConsoleWindow()` with the window (`attach_console_window`). conhost
+  and the client are siblings, both children of `wineconsole.exe`.
+- After attaching, `CreateFileW("CONOUT$")`, `GetConsoleScreenBufferInfo`
+  (buffer 80x150, cursor) and `ReadConsoleOutputCharacterW` give the text
+  exactly. The bridge attaches only for each read (about 2 ms) and reads
+  rows 0 up to the cursor or window bottom in one call
+  (`describe_console`), every 100 ms while the console is foreground
+  (`poll_console`). Wine's `AttachConsole` replaces the std handles and
+  `FreeConsole` closes them (`kernelbase/console.c`), so the bridge saves
+  and restores them; it calls `FreeConsole` once first, because a
+  process with a console cannot attach. Only CTRL_C / CTRL_BREAK exist
+  (no CTRL_CLOSE); the bridge ignores them.
+- The text is diffed on buffer lines, not window rows (a scroll changes
+  every row); `set_text` emits delete + insert. Known gap: a full buffer
+  shifts lines up, giving one huge delete + insert.
+- conhost ignores `SendInput` with `KEYEVENTF_UNICODE`; tests type real
+  keys. `GetGUIThreadInfo` gives a caret rect sometimes one column stale;
+  the buffer cursor is used instead.
+- Orca 51.1 picks its terminal script by the focused object's role
+  (`script_manager._script_for_role`), so the window is a frame with one
+  `terminal` child. It speaks `text-changed:insert` as command output
+  after Return (`treat_event_as_command`, extended to whole lines) and
+  delays printable key echo until the text appears. Confirmed with Orca
+  (2026-11-09): typing, command output, caret moves and Backspace.
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls

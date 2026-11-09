@@ -18,7 +18,7 @@ def describe(obj):
     else:
         extra = (obj.get_attributes() or {}).get("class", "")
     line = "%s [%s] %r" % (obj.get_role_name(), extra, obj.get_name())
-    if obj.get_role() == Atspi.Role.STATUS_BAR:
+    if obj.get_role() in (Atspi.Role.STATUS_BAR, Atspi.Role.TERMINAL):
         text = obj.get_text_iface()
         line += " text=%r" % (Atspi.Text.get_text(text, 0, -1) if text else None)
     return line
