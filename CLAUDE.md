@@ -627,6 +627,10 @@ Found with Wine console windows (`build/exp-console/`,
 3. Standard controls one by one, each with a handler and an AT-SPI
    interface (`Text`, `Selection`, `Value`, ...).
 4. Menus.
-5. Scintilla.
-6. Other popular controls; the off-screen model if a needed program
+5. Application scripts (per-executable fixes, winefile first).
+6. Scintilla.
+7. Other popular controls; the off-screen model if a needed program
    requires it.
+
+Milestones 1 to 4 are done (menus for 64-bit targets only). The planned
+steps and known gaps are listed in `TODO.md`.
