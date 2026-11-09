@@ -386,6 +386,19 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   below the window. The review context is rebuilt after any other key
   or a caret move of the reviewed object. Confirmed with Orca in
   notepad and wordpad (2026-11-09).
+- Flat review of a table with `Selection` takes only its visible cells
+  (`iter_visible_cells`), no column headers: the range comes from
+  `GetAccessibleAtPoint` at the table's corners (x+1, y+1) and
+  (x+w-1, y+h-1), each cell's row and column from its index in parent.
+  A header at the corner would give -1 and nothing is read, so the
+  bridge's `child_at_point` answers only with cells, the nearest visible
+  one when the point is on a header or below the rows. Where Am I
+  selection (Orca+Shift+Up, `present_selection`) climbs from a cell to
+  its table, says `Table.NSelectedRows` of the row count, then the names
+  of the selected children; like GTK 3 the bridge gives the first cells
+  of the selected rows (`describe_table_selection`). Plain Where Am I
+  says nothing about the selection. Confirmed with Orca on
+  `tests/controls.c` "Files" (2026-11-09).
 - Object navigator (`object_navigator_command_definitions.py`):
   Orca+Ctrl+arrows move, Orca+Ctrl+Return activates, Orca+Shift+A lists
   the object's actions. Activation tries the actions click, press, jump,
