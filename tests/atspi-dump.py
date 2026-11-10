@@ -55,7 +55,17 @@ def describe(obj):
             line += text_lines(obj)
         if obj.get_table_iface() is not None and obj.get_selection_iface() is not None:
             line += table_view(obj)
+        elif obj.get_selection_iface() is not None:
+            line += "\n    selected children=%r" % selected_names(obj)
     return line
+
+
+def selected_names(obj):
+    names = []
+    for i in range(Atspi.Selection.get_n_selected_children(obj)):
+        child = Atspi.Selection.get_selected_child(obj, i)
+        names.append(child.get_name() if child is not None else None)
+    return names
 
 
 def cell_coordinates(table, cell):
@@ -71,12 +81,8 @@ def table_view(table):
     """Selected rows, then the visible cell range Orca's flat review finds
     from the cells at the table's corners (_get_visible_cell_range)."""
     rows = Atspi.Table.get_selected_rows(table)
-    count = Atspi.Selection.get_n_selected_children(table)
-    names = []
-    for i in range(count):
-        child = Atspi.Selection.get_selected_child(table, i)
-        names.append(child.get_name() if child is not None else None)
-    r = Atspi.Component.get_extents(table, Atspi.CoordType.WINDOW)
+    names = selected_names(table)
+    r =Atspi.Component.get_extents(table, Atspi.CoordType.WINDOW)
     first = Atspi.Component.get_accessible_at_point(
         table, r.x + 1, r.y + 1, Atspi.CoordType.WINDOW)
     last = Atspi.Component.get_accessible_at_point(

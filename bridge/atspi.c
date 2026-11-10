@@ -434,7 +434,7 @@ struct node
     char **headers;
     gint row;
     gint column;
-    /* Table: selected rows, the first selected_listed of them known. */
+    /* Table or list box: selected rows or items, the first selected_listed known. */
     gint selected_count;
     gint selected_listed;
     gint *selected_rows;
@@ -840,6 +840,8 @@ static const char *const *node_interfaces(struct node *node, guint *count)
         ifaces[(*count)++] = IFACE_TABLE;
         ifaces[(*count)++] = IFACE_SELECTION;
     }
+    else if (node->role == BRIDGE_ROLE_LIST_BOX)
+        ifaces[(*count)++] = IFACE_SELECTION;
     else if (node->role == BRIDGE_ROLE_TABLE_CELL)
         ifaces[(*count)++] = IFACE_TABLE_CELL;
     else if (node->chars)
@@ -899,21 +901,33 @@ static gint cell_index(struct node *table, gint row, gint column)
 }
 
 /*
- * The Win32 side lists the first selected rows; beyond them a row is
- * selected if its cell says so, which is known only for rows that were
- * described.
+ * Child index of row (a table's row, a list box's item) as it is
+ * selected: a table's first cell of the row, a list box's item. -1 if
+ * there is none.
  */
-static gboolean row_selected(struct node *table, gint row)
+static gint selection_index(struct node *list, gint row)
 {
-    gint index = cell_index(table, row, 0), i;
-    struct node *cell = index >= 0 ? table->children->pdata[index] : NULL;
+    if (list->role == BRIDGE_ROLE_TABLE)
+        return cell_index(list, row, 0);
+    return row >= 0 && row < (gint)list->children->len ? row : -1;
+}
+
+/*
+ * The Win32 side lists the first selected rows or items; beyond them a
+ * row is selected if its cell says so, which is known only for rows that
+ * were described.
+ */
+static gboolean row_selected(struct node *list, gint row)
+{
+    gint index = selection_index(list, row), i;
+    struct node *cell = index >= 0 ? list->children->pdata[index] : NULL;
 
     if (index < 0)
         return FALSE;
-    for (i = 0; i < table->selected_listed; i++)
-        if (table->selected_rows[i] == row)
+    for (i = 0; i < list->selected_listed; i++)
+        if (list->selected_rows[i] == row)
             return TRUE;
-    if (table->selected_listed == table->selected_count)
+    if (list->selected_listed == list->selected_count)
         return FALSE;
     return cell && (cell->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED));
 }
@@ -922,8 +936,11 @@ static gboolean row_selected(struct node *table, gint row)
  * Selection of a table, as GTK 3's tree view gives it: the selected
  * children are the first cells of the selected rows. Orca's flat review
  * reads only the visible cells of a table with Table and Selection
- * (ax_utilities.py, _get_on_screen_objects). Changing the selection is
- * not supported.
+ * (ax_utilities.py, _get_on_screen_objects). A list box's selected
+ * children are its selected items; Where Am I selection (Orca+Shift+Up)
+ * needs a container with Selection (get_selection_container in
+ * ax_utilities_selection.py), else it speaks the selected text.
+ * Changing the selection is not supported.
  */
 static GVariant *selection_method(struct node *node, const char *method, GVariant *params)
 {
@@ -933,14 +950,18 @@ static GVariant *selection_method(struct node *node, const char *method, GVarian
         g_variant_get(params, "(i)", &index);
     if (!g_strcmp0(method, "GetSelectedChild"))
     {
-        gint cell = index >= 0 && index < node->selected_listed ?
-                    cell_index(node, node->selected_rows[index], 0) : -1;
+        gint child = index >= 0 && index < node->selected_listed ?
+                     selection_index(node, node->selected_rows[index]) : -1;
 
-        return g_variant_new("(@(so))", cell >= 0 ? node_ref(child_at(node, cell)) : null_ref());
+        return g_variant_new("(@(so))", child >= 0 ? node_ref(child_at(node, child)) : null_ref());
     }
     if (!g_strcmp0(method, "IsChildSelected"))
+    {
+        if (node->role != BRIDGE_ROLE_TABLE)
+            return g_variant_new("(b)", row_selected(node, index));
         return g_variant_new("(b)", n && index >= n && index < (gint)node->children->len &&
                                     row_selected(node, index / n - 1));
+    }
     if (!g_strcmp0(method, "SelectChild") || !g_strcmp0(method, "DeselectSelectedChild") ||
         !g_strcmp0(method, "SelectAll") || !g_strcmp0(method, "ClearSelection") ||
         !g_strcmp0(method, "DeselectChild"))
@@ -1566,8 +1587,8 @@ static void sync_items(struct node *list)
 
 /*
  * Copies the columns of obj; for a table, its header texts and selected
- * rows. Slots laid out for another role or column count are dropped
- * first.
+ * rows, for a list box its selected items. Slots laid out for another
+ * role or column count are dropped first.
  */
 static void set_columns(struct node *node, const struct bridge_object *obj)
 {
@@ -1582,7 +1603,7 @@ static void set_columns(struct node *node, const struct bridge_object *obj)
     g_free(node->selected_rows);
     node->selected_rows = NULL;
     node->selected_count = node->selected_listed = 0;
-    if (obj->role != BRIDGE_ROLE_TABLE)
+    if (obj->role != BRIDGE_ROLE_TABLE && obj->role != BRIDGE_ROLE_LIST_BOX)
         return;
     node->selected_count = obj->selected_count;
     if (obj->selected_listed > 0 && obj->selected_rows)
@@ -1590,6 +1611,8 @@ static void set_columns(struct node *node, const struct bridge_object *obj)
         node->selected_listed = obj->selected_listed;
         node->selected_rows = g_memdup2(obj->selected_rows, obj->selected_listed * sizeof(int));
     }
+    if (obj->role != BRIDGE_ROLE_TABLE)
+        return;
     node->headers = g_new0(char *, obj->column_count + 1);
     for (i = 0; i < obj->column_count; i++)
     {

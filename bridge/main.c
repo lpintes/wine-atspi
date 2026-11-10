@@ -1635,15 +1635,42 @@ static int toolbar_focus(HWND hwnd)
  * Selected rows of a list view in report view, for the table's Selection
  * interface: with it Orca's flat review reads only the visible cells
  * (ax_utilities.py, _get_on_screen_objects), and Where Am I counts the
- * selected rows from the table.
+ * selected rows from the table. A list box gets the same for its
+ * Selection, with item indices.
  */
-static void describe_table_selection(HWND hwnd, struct bridge_object *obj,
-                                     struct focus_strings *str)
+static void describe_list_selection(HWND hwnd, BOOL listview, struct bridge_object *obj,
+                                    struct focus_strings *str)
 {
     DWORD_PTR count = 0, item = (DWORD_PTR)-1;
 
     obj->selected_count = obj->selected_listed = 0;
     obj->selected_rows = str->selected_rows;
+    if (!listview)
+    {
+        /*
+         * Wine marshals LB_GETSELITEMS; it and LB_GETSELCOUNT fail with
+         * LB_ERR on a single-selection list.
+         */
+        if (!(obj->states & BRIDGE_STATE_BIT(BRIDGE_STATE_MULTISELECTABLE)))
+        {
+            if (SendMessageTimeoutW(hwnd, LB_GETCURSEL, 0, 0, SMTO_ABORTIFHUNG, 500, &item) &&
+                (int)item >= 0)
+            {
+                str->selected_rows[0] = (int)item;
+                obj->selected_count = obj->selected_listed = 1;
+            }
+            return;
+        }
+        if (!SendMessageTimeoutW(hwnd, LB_GETSELCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) ||
+            (int)count <= 0 ||
+            !SendMessageTimeoutW(hwnd, LB_GETSELITEMS, MAX_SELECTED_ROWS,
+                                 (LPARAM)str->selected_rows, SMTO_ABORTIFHUNG, 500, &item) ||
+            (int)item < 0)
+            return;
+        obj->selected_count = (int)count;
+        obj->selected_listed = (int)item;
+        return;
+    }
     if (!SendMessageTimeoutW(hwnd, LVM_GETSELECTEDCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) ||
         (LONG)count <= 0)
         return;
@@ -1679,6 +1706,7 @@ static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *ob
     if (SendMessageTimeoutW(hwnd, listview ? LVM_GETITEMCOUNT : LB_GETCOUNT, 0, 0,
                             SMTO_ABORTIFHUNG, 500, &count) && (LONG)count >= 0)
         obj->set_size = (int)count;
+    describe_list_selection(hwnd, listview, obj, str);
     if (!listview || !remote_open(hwnd, &r))
         return;
     obj->column_count = listview_columns(hwnd, &r, order);
@@ -1694,7 +1722,6 @@ static void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *ob
     {
         obj->role = BRIDGE_ROLE_TABLE;
         obj->columns = str->header_ptrs;
-        describe_table_selection(hwnd, obj, str);
     }
 }
 
@@ -2980,13 +3007,23 @@ static void report_tree(HWND top, HWND control, BOOL items)
     b.items = items;
     if (b.objects && b.parents && b.str)
     {
+        GetWindowThreadProcessId(top, &pid);
         if (!control)
             add_tree_children(&b, top);
         else if (GetClassNameW(control, cls, ARRAYSIZE(cls)) && is_item_control(cls))
+        {
+            /*
+             * The control too: a key may select an item without moving
+             * the focus (the first Down in a ListBox), or add items.
+             */
+            if (describe_tree_window(control, cls, &b.objects[0], b.str))
+                atspi_post_update(pid, &b.objects[0]);
+            free_strings(b.str);
+            memset(&b.objects[0], 0, sizeof(b.objects[0]));
             add_tree_items(&b, control, cls);
+        }
         memset(&tree, 0, sizeof(tree));
         describe_frame(top, &tree.frame, b.str);
-        GetWindowThreadProcessId(top, &pid);
         tree.pid = pid;
         get_app_name(pid, b.str->app, sizeof(b.str->app));
         tree.app_name = b.str->app;

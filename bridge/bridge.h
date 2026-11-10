@@ -134,9 +134,9 @@ struct bridge_object
     const char *const *columns;
     const int *column_extents;
     /*
-     * Selection of a table: selected_count rows are selected, the first
-     * selected_listed of them (row indices from 0, ascending) are in
-     * selected_rows. 0 and NULL for other objects.
+     * Selection of a table or list box: selected_count rows or items are
+     * selected, the first selected_listed of them (indices from 0,
+     * ascending) are in selected_rows. 0 and NULL for other objects.
      */
     int selected_count;
     int selected_listed;

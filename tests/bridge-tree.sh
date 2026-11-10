@@ -43,6 +43,14 @@ timeout 10 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 k:end w:1000
     echo "--- controls, Files scrolled to the end"
     python3 tests/atspi-dump.py -v controls
 } >> "$LOG" 2>&1
+# The list boxes have Selection: Colors (extended) two items, Fruits
+# (single) one.
+timeout 10 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 k:shift+tab w:300 \
+    k:down w:300 k:shift+down w:300 k:shift+tab w:300 k:shift+tab w:300 k:down w:1000
+{
+    echo "--- controls, Colors and Fruits selected"
+    python3 tests/atspi-dump.py -v controls
+} >> "$LOG" 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 k:escape w:1000
 
 # notepad: frame > text (and the menu bar once a menu was open).

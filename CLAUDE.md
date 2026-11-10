@@ -396,9 +396,20 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   selection (Orca+Shift+Up, `present_selection`) climbs from a cell to
   its table, says `Table.NSelectedRows` of the row count, then the names
   of the selected children; like GTK 3 the bridge gives the first cells
-  of the selected rows (`describe_table_selection`). Plain Where Am I
+  of the selected rows (`describe_list_selection`). Plain Where Am I
   says nothing about the selection. Confirmed with Orca on
   `tests/controls.c` "Files" (2026-11-09).
+- From a list item Where Am I selection climbs to a `list box` with
+  `Selection` (`get_selection_container`); without one it speaks the
+  selected text instead. The count of selectable items is the number of
+  `list item` descendants (`selectable_child_count`, no `Collection`),
+  which the bridge's item slots give. A `ListBox` gives its selection
+  with `LB_GETCURSEL` (single) or `LB_GETSELCOUNT` / `LB_GETSELITEMS`
+  (multiple; marshalled by Wine, `LB_ERR` on a single-selection list).
+  The first Down in a `ListBox` selects item 0 without moving the focus,
+  so the key's item refresh posts the list itself too (`report_tree`
+  with a control). Confirmed with Orca on `tests/controls.c` "Colors"
+  and "Fruits" (2026-11-10); `tests/bridge-tree.sh`.
 - Object navigator (`object_navigator_command_definitions.py`):
   Orca+Ctrl+arrows move, Orca+Ctrl+Return activates, Orca+Shift+A lists
   the object's actions. Activation tries the actions click, press, jump,
@@ -723,7 +734,10 @@ XTest keys, Wine 11.21, 2026-11-09).
     and stays a zombie that keeps the `WineAtspiBridge` mutex, so every
     new bridge exits and programs run without it (seen 2026-11-10;
     `wineserver -k` cleans up). `copy-to-vm.sh` copies to a staging
-    directory and renames into place.
+    directory and renames into place. A bridge that already runs keeps
+    the old, deleted file (`/proc/<pid>/maps` says `(deleted)`), so
+    `wineserver -k` in the VM after copying, else Orca still talks to
+    the old code (seen 2026-11-10).
   - Final checks: native boot through `restart-do-archu.cmd`.
 - **Keep the Wine version identical** in WSL and in the image
   (`pacman -Q wine` on both). A Winelib binary is tied to the Wine it was
