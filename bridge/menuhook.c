@@ -3,12 +3,14 @@
  * WH_CALLWNDPROC hook, so Wine loads it into every GUI process of the
  * prefix (user32/hook.c, get_hook_proc). It watches the menu messages
  * that Wine sends to the menu owner and reports each highlighted item to
- * the bridge as a struct menu_record (menuhook.h) by WM_COPYDATA.
+ * the bridge as a struct menu_record (menuhook.h) by WM_COPYDATA. It also
+ * answers the bridge's TOOLTIP_MESSAGE for toolbar buttons.
  *
  * Built with mingw, not winegcc: a Winelib DLL cannot be loaded into a
  * PE process.
  */
 #include <windows.h>
+#include <commctrl.h>
 
 #include "menuhook.h"
 
@@ -256,12 +258,60 @@ static void on_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
 }
 
+/* TRUE if the TOOLTIP_TEXT_MAX WCHARs at text are writable memory. */
+static BOOL is_writable_buffer(WCHAR *text)
+{
+    MEMORY_BASIC_INFORMATION info;
+    const char *start = (const char *)text, *end = start + TOOLTIP_TEXT_MAX * sizeof(WCHAR);
+
+    return text && VirtualQuery(text, &info, sizeof(info)) == sizeof(info) &&
+           info.State == MEM_COMMIT && info.Protect == PAGE_READWRITE &&
+           end <= (const char *)info.BaseAddress + info.RegionSize;
+}
+
+/*
+ * Asks the toolbar for the tooltip of a button the way its tooltip
+ * control does: the toolbar tries TBN_GETINFOTIP, then a hidden button
+ * text, then forwards TTN_GETDISPINFO to its owner (comctl32/toolbar.c,
+ * TOOLBAR_TTGetDispInfo). TB_GETTOOLTIPS creates the tooltip window if
+ * the toolbar has none yet, as the first mouse move would.
+ */
+static void answer_tooltip(HWND toolbar, UINT command, WCHAR *text)
+{
+    NMTTDISPINFOW info;
+    WCHAR cls[32];
+
+    if (!GetClassNameW(toolbar, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, TOOLBARCLASSNAMEW) ||
+        !is_writable_buffer(text))
+        return;
+    memset(&info, 0, sizeof(info));
+    info.hdr.hwndFrom = (HWND)SendMessageW(toolbar, TB_GETTOOLTIPS, 0, 0);
+    info.hdr.idFrom = command;
+    info.hdr.code = TTN_GETDISPINFOW;
+    info.lpszText = info.szText;
+    SendMessageW(toolbar, WM_NOTIFY, command, (LPARAM)&info);
+    text[0] = 0;
+    if (IS_INTRESOURCE(info.lpszText))
+    {
+        if (info.lpszText && info.hinst)
+            LoadStringW(info.hinst, LOWORD(info.lpszText), text, TOOLTIP_TEXT_MAX);
+    }
+    else
+        lstrcpynW(text, info.lpszText, TOOLTIP_TEXT_MAX);
+}
+
 __declspec(dllexport) LRESULT CALLBACK CallWndProc(int code, WPARAM wp, LPARAM lp)
 {
+    static UINT tooltip_message;
+
+    if (!tooltip_message)
+        tooltip_message = RegisterWindowMessageW(TOOLTIP_MESSAGE);
     if (code == HC_ACTION)
     {
         const CWPSTRUCT *cwp = (const CWPSTRUCT *)lp;
 
+        if (cwp->message == tooltip_message && tooltip_message)
+            answer_tooltip(cwp->hwnd, cwp->wParam, (WCHAR *)cwp->lParam);
         switch (cwp->message)
         {
         case WM_ENTERMENULOOP:

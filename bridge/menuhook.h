@@ -2,7 +2,8 @@
  * Records that the menu hook DLL (menuhook.c), running inside a target
  * process, sends to the bridge with WM_COPYDATA. Menus cannot be read
  * from another process (GetMenuItemInfo fails with error 1400), so the
- * hook reads them where they live.
+ * hook reads them where they live. Toolbar tooltips are asked for the
+ * same way (TOOLTIP_MESSAGE).
  *
  * Windows headers only; included by the hook DLL and the Win32 core.
  * Fixed-size fields, so a 32-bit hook can talk to the 64-bit bridge.
@@ -57,5 +58,17 @@ struct menu_record
     INT32 position;
     INT32 count;
 };
+
+/*
+ * Registered message that the bridge sends to a ToolbarWindow32 to get
+ * the tooltip of a button without text. The tooltip text comes from the
+ * toolbar's owner by WM_NOTIFY, which Wine refuses across processes, so
+ * the hook asks for it inside the target. wParam is the button's command
+ * id, lParam the address of a buffer in the target (allocated by the
+ * bridge) for TOOLTIP_TEXT_MAX WCHARs. The hook writes the text there,
+ * terminated; the buffer is left alone if there is no hook.
+ */
+#define TOOLTIP_MESSAGE L"WineAtspiToolTip"
+#define TOOLTIP_TEXT_MAX 256
 
 #endif

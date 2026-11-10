@@ -57,8 +57,7 @@ The buttons are in the window tree with name, role, states and rect
   items-only refresh (`schedule_items`) of a toolbar would remove its
   child windows in `tree_idle`, so a toolbar needs the whole tree or a
   change there.
-- Names of buttons without text from their tooltips, through the hook
-  DLL (`TTN_GETDISPINFO` / `TBN_GETINFOTIP` from inside the target).
+- Tooltip names need the hook DLL, so 32-bit targets get none.
 - Action "click" for toolbar buttons, if Orca's mouse click fallback is
   not good enough.
 

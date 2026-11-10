@@ -23,7 +23,8 @@
  *
  * Not in Tab order: a ToolbarWindow32 at the bottom with the buttons
  * New, a separator, Bold (check), Wrap (check, checked), Undo (disabled,
- * text from the string list) and one without text.
+ * text from the string list) and Help, without text, named only by its
+ * tooltip (TTN_GETDISPINFOW).
  */
 
 #include <windows.h>
@@ -200,7 +201,7 @@ static void add_tools(HWND parent, int y)
 
     tools = add_control(parent, TOOLBARCLASSNAMEW, NULL,
                         CCS_NOPARENTALIGN | CCS_NORESIZE | CCS_NODIVIDER | TBSTYLE_LIST |
-                        TBSTYLE_FLAT,
+                        TBSTYLE_FLAT | TBSTYLE_TOOLTIPS,
                         10, y, 420, 30, ID_TOOLS);
     SendMessageW(tools, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
     /* The list ends with two NULs. */
@@ -245,6 +246,15 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             SendDlgItemMessageW(hwnd, ID_LEVEL, PBM_SETPOS,
                                 SendMessageW((HWND)lparam, TBM_GETPOS, 0, 0), 0);
         return 0;
+    case WM_NOTIFY:
+    {
+        NMTTDISPINFOW *info = (NMTTDISPINFOW *)lparam;
+
+        /* The toolbar forwards the tooltip request of a button without text. */
+        if (info->hdr.code == TTN_GETDISPINFOW && info->hdr.idFrom == ID_HELP)
+            lstrcpyW(info->szText, L"Help");
+        return 0;
+    }
     case WM_SETFOCUS:
         SetFocus(GetDlgItem(hwnd, ID_FRUITS));
         return 0;

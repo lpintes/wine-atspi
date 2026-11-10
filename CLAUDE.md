@@ -425,8 +425,14 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   no buffer size, so the length is asked first with lParam 0. A button
   without text has its name only in the tooltip: the toolbar asks its
   parent with `TTN_GETDISPINFO`, but Wine refuses `WM_NOTIFY` across
-  processes (`win32u/message.c`), so that needs the hook DLL. Wine's
-  wordpad buttons have neither text nor tooltips. Confirmed with Orca
+  processes (`win32u/message.c`). The bridge sends the toolbar the
+  registered message `WineAtspiToolTip` (command id, buffer in the
+  target); the hook DLL sees it in `WH_CALLWNDPROC` and sends the toolbar
+  `WM_NOTIFY` `TTN_GETDISPINFOW` in-process, which tries `TBN_GETINFOTIP`,
+  the hidden text and then the owner (`TOOLBAR_TTGetDispInfo`)
+  (`get_toolbar_tooltip`, `answer_tooltip`). This names the Open
+  dialog's icon buttons ("O úroveň vyššie", ...; dump, 2026-11-10).
+  Wine's wordpad buttons have neither text nor tooltips. Confirmed with Orca
   flat review on `tests/controls.c` (2026-11-10): "New nestlačené Bold
   stlačené Wrap Undo tlačidlo". Flat review puts a state zone
   (`StateZone`) before the name of a checkable object, an unnamed object
@@ -699,6 +705,11 @@ XTest keys, Wine 11.21, 2026-11-09).
     `arch-vm` in `~/.ssh/config`: key `~/.ssh/arch-vm` without passphrase,
     installed in the image. The main `id_rsa` has a passphrase and no agent
     runs, so it cannot be used from here.
+  - Never overwrite a running bridge's `.so` in place: the bridge crashes
+    and stays a zombie that keeps the `WineAtspiBridge` mutex, so every
+    new bridge exits and programs run without it (seen 2026-11-10;
+    `wineserver -k` cleans up). `copy-to-vm.sh` copies to a staging
+    directory and renames into place.
   - Final checks: native boot through `restart-do-archu.cmd`.
 - **Keep the Wine version identical** in WSL and in the image
   (`pacman -Q wine` on both). A Winelib binary is tied to the Wine it was

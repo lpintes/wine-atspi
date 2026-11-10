@@ -1484,11 +1484,37 @@ struct tbbuttoninfo32
 };
 
 /*
+ * Tooltip of a button without text, the only name most icon buttons have.
+ * The toolbar gets it from its owner by WM_NOTIFY, which Wine refuses
+ * across processes, so the hook DLL asks inside the target
+ * (TOOLTIP_MESSAGE in menuhook.h). Without the hook (32-bit target) the
+ * text stays empty.
+ */
+static void get_toolbar_tooltip(HWND hwnd, struct remote *r, int command, WCHAR *text)
+{
+    static UINT message;
+    DWORD_PTR ret;
+    SIZE_T done;
+
+    C_ASSERT(TOOLTIP_TEXT_MAX <= CELL_TEXT_MAX);
+    text[0] = 0;
+    if (!message)
+        message = RegisterWindowMessageW(TOOLTIP_MESSAGE);
+    if (!message || !WriteProcessMemory(r->process, r->base, L"", sizeof(WCHAR), &done) ||
+        !SendMessageTimeoutW(hwnd, message, command, (LPARAM)r->base, SMTO_ABORTIFHUNG, 500,
+                             &ret) ||
+        !ReadProcessMemory(r->process, r->base, text, TOOLTIP_TEXT_MAX * sizeof(WCHAR), &done))
+        text[0] = 0;
+    text[TOOLTIP_TEXT_MAX - 1] = 0;
+}
+
+/*
  * Button index of a toolbar. Wine's comctl32/toolbar.c emits no WinEvent
  * and has no oleacc proxy, so the button is read with toolbar messages;
  * all of them need memory in the target. TB_GETBUTTONINFOW gives no text
  * from the string list (TB_ADDSTRING), TB_GETBUTTONTEXTW does, but it
- * takes no buffer size, so the length is asked first. The MSAA child id
+ * takes no buffer size, so the length is asked first. A button without
+ * text is named by its tooltip (get_toolbar_tooltip). The MSAA child id
  * is index + 1, as on Windows. TRUE if described, FALSE if the toolbar
  * did not answer, -1 for a separator or hidden button.
  */
@@ -1550,6 +1576,8 @@ static int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
                             SMTO_ABORTIFHUNG, 500, &ret) &&
         ReadProcessMemory(r->process, r->base, text, (len + 1) * sizeof(WCHAR), &done))
         text[len] = 0;
+    if (!text[0])
+        get_toolbar_tooltip(hwnd, r, command, text);
 
     SetRectEmpty(&rect);
     obj->has_extents = FALSE;
