@@ -20,6 +20,10 @@
  *   "Count:"   Edit with a msctls_updown32 buddy, 1 to 10 at 3
  *   "Run"      Button: fills "Level:" from 0 to 100 in 20 s
  *   "Close"    Button
+ *
+ * Not in Tab order: a ToolbarWindow32 at the bottom with the buttons
+ * New, a separator, Bold (check), Wrap (check, checked), Undo (disabled,
+ * text from the string list) and one without text.
  */
 
 #include <windows.h>
@@ -28,7 +32,8 @@
 #define CLASS_NAME L"WineAtspiControls"
 
 enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_VOLUME,
-       ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE };
+       ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE, ID_TOOLS, ID_NEW, ID_BOLD,
+       ID_WRAP, ID_UNDO, ID_HELP };
 
 /* "Run" fills "Level:" from 0 to 100 in 20 s, as a long task would. */
 #define RUN_STEP 5
@@ -177,6 +182,32 @@ static void add_count(HWND parent, int y)
     SendMessageW(updown, UDM_SETPOS32, 0, 3);
 }
 
+static void add_tools(HWND parent, int y)
+{
+    TBBUTTON buttons[] = {
+        { I_IMAGENONE, ID_NEW, TBSTATE_ENABLED, BTNS_BUTTON | BTNS_AUTOSIZE, { 0 }, 0,
+          (INT_PTR)L"New" },
+        { 0, 0, 0, BTNS_SEP, { 0 }, 0, -1 },
+        { I_IMAGENONE, ID_BOLD, TBSTATE_ENABLED, BTNS_CHECK | BTNS_AUTOSIZE, { 0 }, 0,
+          (INT_PTR)L"Bold" },
+        { I_IMAGENONE, ID_WRAP, TBSTATE_ENABLED | TBSTATE_CHECKED, BTNS_CHECK | BTNS_AUTOSIZE,
+          { 0 }, 0, (INT_PTR)L"Wrap" },
+        /* iString set below, an index into the string list. */
+        { I_IMAGENONE, ID_UNDO, 0, BTNS_BUTTON | BTNS_AUTOSIZE, { 0 }, 0, 0 },
+        { I_IMAGENONE, ID_HELP, TBSTATE_ENABLED, BTNS_BUTTON, { 0 }, 0, -1 },
+    };
+    HWND tools;
+
+    tools = add_control(parent, TOOLBARCLASSNAMEW, NULL,
+                        CCS_NOPARENTALIGN | CCS_NORESIZE | CCS_NODIVIDER | TBSTYLE_LIST |
+                        TBSTYLE_FLAT,
+                        10, y, 420, 30, ID_TOOLS);
+    SendMessageW(tools, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
+    /* The list ends with two NULs. */
+    buttons[4].iString = SendMessageW(tools, TB_ADDSTRINGW, 0, (LPARAM)L"Undo\0");
+    SendMessageW(tools, TB_ADDBUTTONSW, ARRAYSIZE(buttons), (LPARAM)buttons);
+}
+
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static const WCHAR *const fruits[] = { L"Apple", L"Banana", L"Cherry", NULL };
@@ -197,6 +228,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                     120, 660, 100, 25, ID_RUN);
         add_control(hwnd, L"Button", L"Close", WS_TABSTOP | BS_PUSHBUTTON,
                     240, 660, 100, 25, ID_CLOSE);
+        add_tools(hwnd, 700);
         return 0;
     case WM_TIMER:
     {
@@ -250,7 +282,7 @@ int main(void)
     wc.lpszClassName = CLASS_NAME;
     RegisterClassW(&wc);
     hwnd = CreateWindowExW(0, CLASS_NAME, L"Controls", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 740, NULL, NULL,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 780, NULL, NULL,
                            wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     while (GetMessageW(&msg, NULL, 0, 0) > 0)

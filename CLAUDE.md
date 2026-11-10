@@ -412,6 +412,26 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   (`user32/button.c`), so the button gets focus and notifies
   `BN_CLICKED`. Confirmed with Orca in the Arch image (2026-11-09); in
   WSLg the navigator keys did not work (legacy device).
+- Toolbars: a `tool bar` ancestor is spoken (default presentation, not
+  a disabled context role); a `toggle button` says pressed from the
+  state checked or pressed. Wine's `comctl32/toolbar.c` emits no
+  WinEvent and has no `oleacc` proxy. The bridge puts the buttons below
+  the toolbar in the window tree (`describe_toolbar_button_in`, child
+  index + 1): `TB_GETBUTTONINFOW` with `TBIF_BYINDEX` for command,
+  state and style (`BTNS_CHECK` -> toggle button, separators and hidden
+  buttons left out), `TB_GETBUTTONTEXTW` for the text, `TB_GETITEMRECT`;
+  all need memory in the target. `TB_GETBUTTONINFOW` gives no text from
+  the string list (`TB_ADDSTRING`), `TB_GETBUTTONTEXTW` does but takes
+  no buffer size, so the length is asked first with lParam 0. A button
+  without text has its name only in the tooltip: the toolbar asks its
+  parent with `TTN_GETDISPINFO`, but Wine refuses `WM_NOTIFY` across
+  processes (`win32u/message.c`), so that needs the hook DLL. Wine's
+  wordpad buttons have neither text nor tooltips. Confirmed with Orca
+  flat review on `tests/controls.c` (2026-11-10): "New nestlačené Bold
+  stlačené Wrap Undo tlačidlo". Flat review puts a state zone
+  (`StateZone`) before the name of a checkable object, an unnamed object
+  gives its role, and insensitive is not said
+  (`_get_zones_from_object` in `flat_review.py`).
 
 Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
 

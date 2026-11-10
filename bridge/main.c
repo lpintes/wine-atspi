@@ -1463,6 +1463,117 @@ static BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
     return ok;
 }
 
+static BOOL is_toolbar(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"ToolbarWindow32");
+}
+
+/* TBBUTTONINFOW of a 32-bit target. */
+struct tbbuttoninfo32
+{
+    UINT cbSize;
+    DWORD dwMask;
+    int idCommand;
+    int iImage;
+    BYTE fsState;
+    BYTE fsStyle;
+    WORD cx;
+    ULONG lParam;
+    ULONG pszText;
+    int cchText;
+};
+
+/*
+ * Button index of a toolbar. Wine's comctl32/toolbar.c emits no WinEvent
+ * and has no oleacc proxy, so the button is read with toolbar messages;
+ * all of them need memory in the target. TB_GETBUTTONINFOW gives no text
+ * from the string list (TB_ADDSTRING), TB_GETBUTTONTEXTW does, but it
+ * takes no buffer size, so the length is asked first. The MSAA child id
+ * is index + 1, as on Windows. TRUE if described, FALSE if the toolbar
+ * did not answer, -1 for a separator or hidden button.
+ */
+static int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
+                                      struct bridge_object *obj, struct focus_strings *str)
+{
+    BYTE header[REMOTE_HEADER];
+    WCHAR text[CELL_TEXT_MAX];
+    DWORD_PTR ret = 0, len = 0;
+    int command;
+    BYTE state, style;
+    RECT rect;
+    SIZE_T done;
+
+    memset(header, 0, sizeof(header));
+    if (r->wow64)
+    {
+        struct tbbuttoninfo32 *info = (struct tbbuttoninfo32 *)header;
+
+        info->cbSize = sizeof(*info);
+        info->dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE | TBIF_STYLE;
+    }
+    else
+    {
+        TBBUTTONINFOW *info = (TBBUTTONINFOW *)header;
+
+        info->cbSize = sizeof(*info);
+        info->dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE | TBIF_STYLE;
+    }
+    if (!WriteProcessMemory(r->process, r->base, header, sizeof(header), &done) ||
+        !SendMessageTimeoutW(hwnd, TB_GETBUTTONINFOW, index, (LPARAM)r->base,
+                             SMTO_ABORTIFHUNG, 500, &ret) || (int)ret != index ||
+        !ReadProcessMemory(r->process, r->base, header, sizeof(header), &done))
+        return FALSE;
+    if (r->wow64)
+    {
+        struct tbbuttoninfo32 *info = (struct tbbuttoninfo32 *)header;
+
+        command = info->idCommand;
+        state = info->fsState;
+        style = info->fsStyle;
+    }
+    else
+    {
+        TBBUTTONINFOW *info = (TBBUTTONINFOW *)header;
+
+        command = info->idCommand;
+        state = info->fsState;
+        style = info->fsStyle;
+    }
+    if ((style & BTNS_SEP) || (state & TBSTATE_HIDDEN))
+        return -1;
+
+    text[0] = 0;
+    if (SendMessageTimeoutW(hwnd, TB_GETBUTTONTEXTW, command, 0, SMTO_ABORTIFHUNG, 500, &len) &&
+        (int)len > 0 && len < CELL_TEXT_MAX &&
+        WriteProcessMemory(r->process, r->base, L"", sizeof(WCHAR), &done) &&
+        SendMessageTimeoutW(hwnd, TB_GETBUTTONTEXTW, command, (LPARAM)r->base,
+                            SMTO_ABORTIFHUNG, 500, &ret) &&
+        ReadProcessMemory(r->process, r->base, text, (len + 1) * sizeof(WCHAR), &done))
+        text[len] = 0;
+
+    SetRectEmpty(&rect);
+    obj->has_extents = FALSE;
+    if (remote_rect(hwnd, r, TB_GETITEMRECT, index, &rect))
+        set_item_extents(hwnd, rect, obj);
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = index + 1;
+    obj->role = (style & BTNS_CHECK) ? BRIDGE_ROLE_TOGGLE_BUTTON : BRIDGE_ROLE_PUSH_BUTTON;
+    obj->value = NULL;
+    to_utf8(text, str->object, sizeof(str->object));
+    obj->name = str->object;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
+    if (state & TBSTATE_ENABLED)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                       BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE);
+    if (state & TBSTATE_CHECKED)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_CHECKED);
+    if (state & TBSTATE_PRESSED)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_PRESSED);
+    return TRUE;
+}
+
 /*
  * Selected rows of a list view in report view, for the table's Selection
  * interface: with it Orca's flat review reads only the visible cells
@@ -2636,7 +2747,7 @@ static BOOL keep_tree_item(struct tree_build *b, HWND list, const int *clip)
 }
 
 /*
- * The items a list, list view, tree view or tab control shows, after the
+ * The items a list, list view, tree view, tab control or toolbar shows, after the
  * control itself, so that flat review sees them. Only the items in view:
  * a list may hold thousands.
  */
@@ -2655,7 +2766,25 @@ static void add_tree_items(struct tree_build *b, HWND hwnd, const WCHAR *cls)
     /* One block of memory in the target for all items. */
     if (!is_list_box(cls) && !remote_open(hwnd, &r))
         return;
-    if (is_tab_control(cls))
+    if (is_toolbar(cls))
+    {
+        if (!SendMessageTimeoutW(hwnd, TB_BUTTONCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+            count = 0;
+        for (i = 0; i < (int)count && b->count < MAX_TREE; i++)
+        {
+            int ok;
+
+            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
+            ok = describe_toolbar_button_in(hwnd, &r, i, &b->objects[b->count], b->str);
+            if (ok == TRUE)
+                keep_tree_item(b, hwnd, clip);
+            else
+                free_strings(b->str);
+            if (!ok)
+                break;
+        }
+    }
+    else if (is_tab_control(cls))
     {
         if (!SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
             count = 0;
@@ -2749,10 +2878,11 @@ static void add_tree_children(struct tree_build *b, HWND parent)
         keep_strings(obj);
         free_strings(b->str);
         b->parents[b->count++] = (ULONG_PTR)parent;
+        /* A toolbar has both: its buttons and controls on it. */
+        if (b->items && (is_item_control(cls) || is_toolbar(cls)))
+            add_tree_items(b, hwnd, cls);
         if (kind == TREE_NODE)
             add_tree_children(b, hwnd);
-        else if (b->items && is_item_control(cls))
-            add_tree_items(b, hwnd, cls);
     }
 }
 

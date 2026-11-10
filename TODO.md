@@ -48,24 +48,19 @@ Toolbars (step 2) are mostly reachable only this way.
 
 ## 2. Toolbars (`ToolbarWindow32`)
 
-The biggest gap among the controls. A toolbar now gets only the role
-tool bar; its buttons are not read.
+The buttons are in the window tree with name, role, states and rect
+(see "Toolbars" in `CLAUDE.md`). Left:
 
-- Wine's `comctl32/toolbar.c` emits no WinEvent at all. It handles
-  `WM_SETFOCUS` and `WM_KEYDOWN` (arrows move the hot item), so a toolbar
-  that has focus can be followed with the key check and `TB_GETHOTITEM`.
-- Most programs keep the toolbar out of the Tab order, so it is not
-  reachable from the keyboard, only through object navigation or flat
-  review (step 1). Find out what else Orca can do with it
-  (Where Am I) and whether the bridge should expose the
-  buttons as children of the toolbar below the frame anyway.
-- Reading: `TB_BUTTONCOUNT`, `TB_GETBUTTON` (`TBBUTTON`, memory in the
-  target), `TB_GETBUTTONTEXTW` (memory in the target), `TB_GETSTATE`
-  (checked, enabled, pressed). A button without text needs its tooltip
-  (`TB_GETTOOLTIPS`, `TTM_GETTEXTW`, or `TTN_GETDISPINFO` sent to the
-  parent, which only works from inside the target).
-- Test programs: regedit, notepad has none, wordpad has two toolbars and
-  a `ReBarWindow32`. `tests/controls.c` may need one.
+- Focus in a toolbar. `WM_SETFOCUS` makes button 0 hot, Left/Up and
+  Right/Down move the hot item, Space/Return send `WM_COMMAND` to the
+  notify window; follow it with the key check and `TB_GETHOTITEM`. An
+  items-only refresh (`schedule_items`) of a toolbar would remove its
+  child windows in `tree_idle`, so a toolbar needs the whole tree or a
+  change there.
+- Names of buttons without text from their tooltips, through the hook
+  DLL (`TTN_GETDISPINFO` / `TBN_GETINFOTIP` from inside the target).
+- Action "click" for toolbar buttons, if Orca's mouse click fallback is
+  not good enough.
 
 ## 3. Smaller gaps
 

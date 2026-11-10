@@ -511,6 +511,7 @@ static const char *role_name(guint32 role)
     case BRIDGE_ROLE_TABLE_CELL: return "table cell";
     case BRIDGE_ROLE_TERMINAL: return "terminal";
     case BRIDGE_ROLE_TEXT: return "text";
+    case BRIDGE_ROLE_TOGGLE_BUTTON: return "toggle button";
     case BRIDGE_ROLE_TOOL_BAR: return "tool bar";
     case BRIDGE_ROLE_TREE: return "tree";
     case BRIDGE_ROLE_WINDOW: return "window";

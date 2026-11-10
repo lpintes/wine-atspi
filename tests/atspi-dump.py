@@ -26,9 +26,12 @@ def details(obj):
         parts.append("rect=%d,%d %dx%d" % (r.x, r.y, r.width, r.height))
     states = obj.get_state_set()
     for state, label in ((Atspi.StateType.SHOWING, "showing"),
-                         (Atspi.StateType.FOCUSED, "focused")):
+                         (Atspi.StateType.FOCUSED, "focused"),
+                         (Atspi.StateType.CHECKED, "checked")):
         if states.contains(state):
             parts.append(label)
+    if not states.contains(Atspi.StateType.SENSITIVE):
+        parts.append("insensitive")
     action = obj.get_action_iface()
     if action is not None:
         names = [Atspi.Action.get_action_name(action, i)
