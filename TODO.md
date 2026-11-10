@@ -48,15 +48,15 @@ Toolbars (step 2) are mostly reachable only this way.
 
 ## 2. Toolbars (`ToolbarWindow32`)
 
-The buttons are in the window tree with name, role, states and rect
-(see "Toolbars" in `CLAUDE.md`). Left:
+The buttons are in the window tree with name, role, states and rect,
+and a focused toolbar reports its hot button (see "Toolbars" in
+`CLAUDE.md`). Left:
 
-- Focus in a toolbar. `WM_SETFOCUS` makes button 0 hot, Left/Up and
-  Right/Down move the hot item, Space/Return send `WM_COMMAND` to the
-  notify window; follow it with the key check and `TB_GETHOTITEM`. An
-  items-only refresh (`schedule_items`) of a toolbar would remove its
-  child windows in `tree_idle`, so a toolbar needs the whole tree or a
-  change there.
+- A toolbar that is neither flat nor themed gives no hot button
+  (`TB_GETHOTITEM` -1); its focus stays on the toolbar itself.
+- A key gives a toolbar no items-only refresh (`schedule_items` would
+  remove its child windows in `tree_idle`), so a state changed from the
+  keyboard waits for the next whole tree.
 - Tooltip names need the hook DLL, so 32-bit targets get none.
 - Action "click" for toolbar buttons, if Orca's mouse click fallback is
   not good enough.

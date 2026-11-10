@@ -17,7 +17,7 @@ wineserver -k; wineserver -w
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
-python3 tests/atspi-events.py 36 > "$LOG" 2>&1 &
+python3 tests/atspi-events.py 41 > "$LOG" 2>&1 &
 events=$!
 sleep 1
 wine $BUILD/controls.exe.so &
@@ -45,8 +45,12 @@ sleep 2
 # Tab to "Count:" (Edit with up-down): spin button 'Count:' value=3
 # [1..10 step 1] with text '3'; Up gives accessible-value 4, Up 5, Down 4,
 # each with the new text.
+# Tab past "Run" and "Close" to the toolbar: button 'New' in tool bar
+# (hot button 0); Right skips the separator to toggle 'Bold', Right
+# 'Wrap' (checked), Right skips the disabled 'Undo' to 'Help', Right
+# wraps to 'New', Left back to 'Help'.
 # Escape closes the window.
-timeout 45 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
+timeout 50 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:down w:500 k:down w:500 \
     k:tab w:500 \
     k:tab w:500 k:down w:500 k:shift+down w:500 \
@@ -55,7 +59,9 @@ timeout 45 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:left w:500 k:left w:500 k:down w:500 \
     k:tab w:500 k:right w:500 k:right w:500 k:left w:500 \
     k:tab w:500 k:right w:500 k:pgup w:500 k:end w:500 \
-    k:tab w:500 k:up w:500 k:up w:500 k:down w:500
+    k:tab w:500 k:up w:500 k:up w:500 k:down w:500 \
+    k:tab w:500 k:tab w:500 k:tab w:500 \
+    k:right w:500 k:right w:500 k:right w:500 k:right w:500 k:left w:500
 python3 tests/atspi-dump.py controls > $BUILD/dump-running.log 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so k:escape w:1000
 

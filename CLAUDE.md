@@ -412,9 +412,12 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   (`user32/button.c`), so the button gets focus and notifies
   `BN_CLICKED`. Confirmed with Orca in the Arch image (2026-11-09); in
   WSLg the navigator keys did not work (legacy device).
-- Toolbars: a `tool bar` ancestor is spoken (default presentation, not
-  a disabled context role); a `toggle button` says pressed from the
-  state checked or pressed. Wine's `comctl32/toolbar.c` emits no
+- Toolbars: a `tool bar` ancestor is never spoken, like a `tree`: it is
+  not layout-only nor a disabled context role, but `_generate_tool_bar`
+  -> `_generate_default_presentation` gives only the empty prefix for an
+  ancestor, so focus on a button says just "New tlačidlo". Decided
+  (2026-11-10): left as in GTK, no workaround. A `toggle button` says
+  pressed from the state checked or pressed. Wine's `comctl32/toolbar.c` emits no
   WinEvent and has no `oleacc` proxy. The bridge puts the buttons below
   the toolbar in the window tree (`describe_toolbar_button_in`, child
   index + 1): `TB_GETBUTTONINFOW` with `TBIF_BYINDEX` for command,
@@ -438,6 +441,17 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   (`StateZone`) before the name of a checkable object, an unnamed object
   gives its role, and insensitive is not said
   (`_get_zones_from_object` in `flat_review.py`).
+- A focused toolbar moves a hot button: `WM_SETFOCUS` makes button 0
+  hot, Left/Up and Right/Down the previous or next one, skipping
+  separators and disabled buttons and wrapping
+  (`TOOLBAR_SetRelativeHotItem`); Space/Return send `WM_COMMAND` to the
+  notify window without toggling a check button. No WinEvent tells.
+  `TB_GETHOTITEM` works across processes but gives -1 unless the
+  toolbar is `TBSTYLE_FLAT` or themed (`TOOLBAR_GetHotItem`). The bridge
+  reports the hot button as the focus and follows it after each key
+  (`toolbar_focus`). A toolbar answers `WM_GETDLGCODE` with 0, so
+  `IsDialogMessage` takes its arrow keys; `tests/controls.c` subclasses
+  it. Confirmed with Orca on `tests/controls.c` (2026-11-10).
 
 Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
 

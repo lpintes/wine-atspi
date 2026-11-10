@@ -1602,6 +1602,35 @@ static int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
     return TRUE;
 }
 
+static int describe_toolbar_button(HWND hwnd, int index, struct bridge_object *obj,
+                                   struct focus_strings *str)
+{
+    struct remote r;
+    int ok;
+
+    if (!remote_open(hwnd, &r))
+        return FALSE;
+    ok = describe_toolbar_button_in(hwnd, &r, index, obj, str);
+    remote_close(&r);
+    return ok;
+}
+
+/*
+ * The button a focused toolbar moves with the arrow keys: WM_SETFOCUS
+ * makes button 0 hot, Left/Up and Right/Down the previous or next enabled
+ * one (comctl32/toolbar.c, TOOLBAR_SetRelativeHotItem); no WinEvent tells.
+ * TB_GETHOTITEM answers -1 unless the toolbar is flat or themed. -1 if
+ * none, LIST_BUSY if the toolbar did not answer.
+ */
+static int toolbar_focus(HWND hwnd)
+{
+    DWORD_PTR item = (DWORD_PTR)-1;
+
+    if (!SendMessageTimeoutW(hwnd, TB_GETHOTITEM, 0, 0, SMTO_ABORTIFHUNG, 500, &item))
+        return LIST_BUSY;
+    return (int)item;
+}
+
 /*
  * Selected rows of a list view in report view, for the table's Selection
  * interface: with it Orca's flat review reads only the visible cells
@@ -1681,19 +1710,24 @@ static void describe_container(HWND hwnd, struct bridge_object *obj, struct focu
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
     memset(obj, 0, sizeof(*obj));
-    if (!is_list_box(cls) && lstrcmpiW(cls, L"SysListView32") && !is_tree_view(cls) &&
-        !is_tab_control(cls))
+    if (!is_item_control(cls) && !is_toolbar(cls))
         return;
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->window_class = str->object_class;
-    find_label(hwnd, str->container, sizeof(str->container));
+    /* A toolbar has no label; Wine's oleacc names it by its window text. */
+    if (is_toolbar(cls))
+        get_window_text(hwnd, str->container, sizeof(str->container));
+    else
+        find_label(hwnd, str->container, sizeof(str->container));
     obj->name = str->container;
     obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
-    if (is_tree_view(cls))
+    if (is_toolbar(cls))
+        obj->role = BRIDGE_ROLE_TOOL_BAR;
+    else if (is_tree_view(cls))
         obj->role = BRIDGE_ROLE_TREE;
     else if (is_tab_control(cls))
     {
@@ -2355,6 +2389,16 @@ static BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         if (item >= 0)
             return describe_tab_item(hwnd, item, obj, str);
     }
+    if (id_object == OBJID_CLIENT && is_toolbar(cls))
+    {
+        /* The focus of a toolbar is its hot button, see toolbar_focus. */
+        int item = id_child > 0 ? id_child - 1 : toolbar_focus(hwnd);
+
+        if (item == LIST_BUSY)
+            return FALSE;
+        if (item >= 0 && describe_toolbar_button(hwnd, item, obj, str) == TRUE)
+            return TRUE;
+    }
     listview = id_object == OBJID_CLIENT && !lstrcmpiW(cls, L"SysListView32");
     if (listview)
     {
@@ -2682,7 +2726,7 @@ static BOOL describe_tree_window(HWND hwnd, const WCHAR *cls, struct bridge_obje
     memset(obj, 0, sizeof(*obj));
     if (!lstrcmpiW(cls, L"Static"))
         return describe_label(hwnd, str->object, sizeof(str->object), obj);
-    if (is_item_control(cls))
+    if (is_item_control(cls) || is_toolbar(cls))
     {
         describe_container(hwnd, obj, str);
         return obj->hwnd != 0;
@@ -3185,7 +3229,7 @@ static void on_focus(HWND hwnd, LONG id_object, LONG id_child)
  * Wine's ListBox moves its caret on arrow keys without a focus event
  * (listbox.c, LISTBOX_HandleKeyDown), and SysListView32 and SysTreeView32
  * emit no focus events at all; SysTabControl32 emits only a selection
- * event, which is not hooked. Reports the new item as focused and returns TRUE.
+ * event, which is not hooked; ToolbarWindow32 none (toolbar_focus). Reports the new item as focused and returns TRUE.
  * FALSE if hwnd is no list or the caret did not move, LIST_BUSY if the
  * list did not answer.
  */
@@ -3207,9 +3251,10 @@ static int check_list_caret(HWND hwnd)
         on_focus(hwnd, OBJID_CLIENT, tree_child_id(item));
         return TRUE;
     }
-    if (!lstrcmpiW(cls, L"SysListView32") || is_tab_control(cls))
+    if (!lstrcmpiW(cls, L"SysListView32") || is_tab_control(cls) || is_toolbar(cls))
     {
-        caret = is_tab_control(cls) ? tab_focus(hwnd) : listview_focus(hwnd);
+        caret = is_tab_control(cls) ? tab_focus(hwnd) :
+                is_toolbar(cls) ? toolbar_focus(hwnd) : listview_focus(hwnd);
         if ((LONG)caret == LIST_BUSY)
             return LIST_BUSY;
     }

@@ -20,11 +20,11 @@
  *   "Count:"   Edit with a msctls_updown32 buddy, 1 to 10 at 3
  *   "Run"      Button: fills "Level:" from 0 to 100 in 20 s
  *   "Close"    Button
- *
- * Not in Tab order: a ToolbarWindow32 at the bottom with the buttons
- * New, a separator, Bold (check), Wrap (check, checked), Undo (disabled,
- * text from the string list) and Help, without text, named only by its
- * tooltip (TTN_GETDISPINFOW).
+ *   ToolbarWindow32 at the bottom, flat, with the buttons New, a
+ *              separator, Bold (check), Wrap (check, checked), Undo
+ *              (disabled, text from the string list) and Help, without
+ *              text, named only by its tooltip (TTN_GETDISPINFOW); arrow
+ *              keys move its hot button
  */
 
 #include <windows.h>
@@ -183,6 +183,19 @@ static void add_count(HWND parent, int y)
     SendMessageW(updown, UDM_SETPOS32, 0, 3);
 }
 
+static WNDPROC toolbar_proc;
+
+/*
+ * A toolbar answers WM_GETDLGCODE with 0, so IsDialogMessage would take
+ * its arrow keys; it moves its hot button with them (TOOLBAR_KeyDown).
+ */
+static LRESULT CALLBACK tools_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    if (msg == WM_GETDLGCODE)
+        return DLGC_WANTARROWS;
+    return CallWindowProcW(toolbar_proc, hwnd, msg, wparam, lparam);
+}
+
 static void add_tools(HWND parent, int y)
 {
     TBBUTTON buttons[] = {
@@ -200,9 +213,10 @@ static void add_tools(HWND parent, int y)
     HWND tools;
 
     tools = add_control(parent, TOOLBARCLASSNAMEW, NULL,
-                        CCS_NOPARENTALIGN | CCS_NORESIZE | CCS_NODIVIDER | TBSTYLE_LIST |
-                        TBSTYLE_FLAT | TBSTYLE_TOOLTIPS,
+                        WS_TABSTOP | CCS_NOPARENTALIGN | CCS_NORESIZE | CCS_NODIVIDER |
+                        TBSTYLE_LIST | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS,
                         10, y, 420, 30, ID_TOOLS);
+    toolbar_proc = (WNDPROC)SetWindowLongPtrW(tools, GWLP_WNDPROC, (LONG_PTR)tools_proc);
     SendMessageW(tools, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
     /* The list ends with two NULs. */
     buttons[4].iString = SendMessageW(tools, TB_ADDSTRINGW, 0, (LPARAM)L"Undo\0");
