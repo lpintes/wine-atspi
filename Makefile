@@ -24,10 +24,15 @@ GIO_LIBS := $(shell pkg-config --libs gio-2.0)
 $(BUILD)/atspi.o: bridge/atspi.c bridge/bridge.h | $(BUILD)
 	$(CC) $(CFLAGS) -fPIC $(GIO_CFLAGS) -c -o $@ $<
 
-$(BUILD)/main.o: bridge/main.c bridge/bridge.h bridge/menuhook.h | $(BUILD)
+# Win32 core: winegcc, Windows headers only (see bridge/core.h).
+CORE = main util object range text labels listview tab toolbar listbox treeview \
+	console statusbar wintree events menu keys
+CORE_OBJS = $(CORE:%=$(BUILD)/%.o)
+
+$(CORE_OBJS): $(BUILD)/%.o: bridge/%.c bridge/core.h bridge/bridge.h bridge/menuhook.h | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -c -o $@ $<
 
-$(BUILD)/wine-atspi.exe.so: $(BUILD)/main.o $(BUILD)/atspi.o
+$(BUILD)/wine-atspi.exe.so: $(CORE_OBJS) $(BUILD)/atspi.o
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/wine-atspi.exe $^ $(GIO_LIBS) \
 		-loleacc -lole32 -loleaut32 -lshell32 -lntdll
 

@@ -51,6 +51,11 @@ the same way NVDA does.
   headers. It has to compile with mingw as well, so it can run on real
   Windows and be compared with what NVDA sees. The AT-SPI side must not
   include Windows headers.
+- **Source layout:** the Win32 core is split by area into `bridge/*.c`
+  (one file per control family, plus `object.c`, `wintree.c`,
+  `events.c`, `menu.c`, `keys.c`, `main.c`); what they share is in
+  `bridge/core.h`, whose top comment lists the files. The AT-SPI side
+  is `bridge/atspi.c`, the interface between the two `bridge/bridge.h`.
 - **One AT-SPI application per Wine process**, each with its own D-Bus
   connection. Orca keeps per-application settings and scripts and announces
   application switches, so lumping all Wine programs into one application
@@ -89,7 +94,7 @@ Checked in the Wine source (`C:\vcs\github.com\wine-mirror\wine`, Wine 11.21,
     listbox focus and selection events come only from a mouse click,
     `LB_SETCURSEL` and `WM_SETFOCUS`. The bridge therefore re-reads the
     focused object 50 ms after each key (`check_after_key` in
-    `bridge/main.c`) and asks a list box for `LB_GETCARETINDEX`.
+    `bridge/events.c`) and asks a list box for `LB_GETCARETINDEX`.
 - Standard messages with pointers (`WM_GETTEXT`, `EM_GETLINE`, ...) are
   marshalled across processes by Wine like on Windows. Custom messages with
   pointers (`SCI_GETTEXTRANGE`, `LVM_GETITEMTEXTW`, `TVM_GETITEMW`, ...) are
@@ -136,7 +141,7 @@ Wine 11.21, 2026-11-05).
 Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
 2026-11-06).
 
-- One winegcc ELF can hold both sides: `bridge/main.c` is built with
+- One winegcc ELF can hold both sides: the Win32 core is built with
   `winegcc -mno-cygwin`, `bridge/atspi.c` with the host `gcc` and
   `pkg-config gio-2.0`, and `winegcc` links both with `-lgio-2.0`. A
   thread created with `CreateThread` runs a GLib main loop and GDBus.
@@ -310,7 +315,7 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   height 0, which is also the answer for an object without the
   `Component` interface (`ax_component.py`, `get_rect`). So every
   whole-window object gets `Component` with its `GetWindowRect`
-  (`get_extents` in `main.c`); list items, cells and tabs get none.
+  (`get_extents` in `object.c`); list items, cells and tabs get none.
   Progress bar speech is on by default, at most every 10 s except at
   100 %, and only for the active application
   (`speak-progress-bar-updates`, `progress-bar-speech-interval`,

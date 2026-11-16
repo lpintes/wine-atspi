@@ -1,0 +1,428 @@
+/*
+ * wine-atspi bridge, Win32 core: describing a window or an MSAA object
+ * (role, states, extents) and choosing the handler of its class.
+ */
+#define COBJMACROS
+#include <windows.h>
+/* Wine's libuuid lacks IID_IAccessible, so define it here, in one file. */
+#include <initguid.h>
+#include "core.h"
+
+static unsigned int map_role(LONG role)
+{
+    switch (role)
+    {
+    case ROLE_SYSTEM_MENUBAR: return BRIDGE_ROLE_MENU_BAR;
+    case ROLE_SYSTEM_SCROLLBAR: return BRIDGE_ROLE_SCROLL_BAR;
+    case ROLE_SYSTEM_WINDOW: return BRIDGE_ROLE_WINDOW;
+    case ROLE_SYSTEM_CLIENT: return BRIDGE_ROLE_PANEL;
+    case ROLE_SYSTEM_MENUPOPUP: return BRIDGE_ROLE_POPUP_MENU;
+    case ROLE_SYSTEM_MENUITEM: return BRIDGE_ROLE_MENU_ITEM;
+    case ROLE_SYSTEM_PANE: return BRIDGE_ROLE_PANEL;
+    case ROLE_SYSTEM_DIALOG: return BRIDGE_ROLE_DIALOG;
+    case ROLE_SYSTEM_GROUPING: return BRIDGE_ROLE_GROUPING;
+    case ROLE_SYSTEM_SEPARATOR: return BRIDGE_ROLE_SEPARATOR;
+    case ROLE_SYSTEM_TOOLBAR: return BRIDGE_ROLE_TOOL_BAR;
+    case ROLE_SYSTEM_STATUSBAR: return BRIDGE_ROLE_STATUS_BAR;
+    case ROLE_SYSTEM_TABLE: return BRIDGE_ROLE_TABLE;
+    case ROLE_SYSTEM_COLUMNHEADER: return BRIDGE_ROLE_COLUMN_HEADER;
+    case ROLE_SYSTEM_ROW: return BRIDGE_ROLE_TABLE_ROW;
+    case ROLE_SYSTEM_CELL: return BRIDGE_ROLE_TABLE_CELL;
+    case ROLE_SYSTEM_LINK: return BRIDGE_ROLE_LINK;
+    case ROLE_SYSTEM_LIST: return BRIDGE_ROLE_LIST;
+    case ROLE_SYSTEM_LISTITEM: return BRIDGE_ROLE_LIST_ITEM;
+    case ROLE_SYSTEM_OUTLINE: return BRIDGE_ROLE_TREE;
+    case ROLE_SYSTEM_OUTLINEITEM: return BRIDGE_ROLE_TREE_ITEM;
+    case ROLE_SYSTEM_PAGETAB: return BRIDGE_ROLE_PAGE_TAB;
+    case ROLE_SYSTEM_PROPERTYPAGE: return BRIDGE_ROLE_PANEL;
+    case ROLE_SYSTEM_GRAPHIC: return BRIDGE_ROLE_IMAGE;
+    case ROLE_SYSTEM_STATICTEXT: return BRIDGE_ROLE_LABEL;
+    case ROLE_SYSTEM_TEXT: return BRIDGE_ROLE_TEXT;
+    case ROLE_SYSTEM_PUSHBUTTON:
+    case ROLE_SYSTEM_BUTTONDROPDOWN:
+    case ROLE_SYSTEM_BUTTONMENU:
+    case ROLE_SYSTEM_SPLITBUTTON: return BRIDGE_ROLE_PUSH_BUTTON;
+    case ROLE_SYSTEM_CHECKBUTTON: return BRIDGE_ROLE_CHECK_BOX;
+    case ROLE_SYSTEM_RADIOBUTTON: return BRIDGE_ROLE_RADIO_BUTTON;
+    case ROLE_SYSTEM_COMBOBOX:
+    case ROLE_SYSTEM_DROPLIST: return BRIDGE_ROLE_COMBO_BOX;
+    case ROLE_SYSTEM_PROGRESSBAR: return BRIDGE_ROLE_PROGRESS_BAR;
+    case ROLE_SYSTEM_SLIDER: return BRIDGE_ROLE_SLIDER;
+    case ROLE_SYSTEM_SPINBUTTON: return BRIDGE_ROLE_SPIN_BUTTON;
+    case ROLE_SYSTEM_PAGETABLIST: return BRIDGE_ROLE_PAGE_TAB_LIST;
+    }
+    return BRIDGE_ROLE_UNKNOWN;
+}
+
+static unsigned long long map_states(LONG state)
+{
+    unsigned long long s = 0;
+
+    if (!(state & STATE_SYSTEM_UNAVAILABLE))
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+             BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE);
+    if (!(state & STATE_SYSTEM_INVISIBLE))
+    {
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE);
+        if (!(state & STATE_SYSTEM_OFFSCREEN))
+            s |= BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
+    }
+    if (state & STATE_SYSTEM_SELECTED)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    if (state & STATE_SYSTEM_FOCUSED)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
+    if (state & STATE_SYSTEM_PRESSED)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_PRESSED);
+    if (state & STATE_SYSTEM_CHECKED)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_CHECKED);
+    if (state & STATE_SYSTEM_MIXED)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_INDETERMINATE);
+    if (state & STATE_SYSTEM_READONLY)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_READ_ONLY);
+    if (state & STATE_SYSTEM_EXPANDED)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_EXPANDABLE) |
+             BRIDGE_STATE_BIT(BRIDGE_STATE_EXPANDED);
+    if (state & STATE_SYSTEM_COLLAPSED)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_EXPANDABLE);
+    if (state & STATE_SYSTEM_FOCUSABLE)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
+    if (state & STATE_SYSTEM_SELECTABLE)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE);
+    if (state & STATE_SYSTEM_MULTISELECTABLE)
+        s |= BRIDGE_STATE_BIT(BRIDGE_STATE_MULTISELECTABLE);
+    return s;
+}
+
+/*
+ * Wine's oleacc has no proxy for most standard controls and calls them
+ * "client". For a whole window the class tells more.
+ */
+unsigned int role_from_class(HWND hwnd, const WCHAR *cls)
+{
+    static const struct { const WCHAR *cls; unsigned int role; } map[] =
+    {
+        { L"ComboBox", BRIDGE_ROLE_COMBO_BOX },
+        { L"ComboBoxEx32", BRIDGE_ROLE_COMBO_BOX },
+        { L"Edit", BRIDGE_ROLE_TEXT },
+        { L"ListBox", BRIDGE_ROLE_LIST },
+        { L"ComboLBox", BRIDGE_ROLE_LIST },
+        { L"msctls_progress32", BRIDGE_ROLE_PROGRESS_BAR },
+        { L"msctls_statusbar32", BRIDGE_ROLE_STATUS_BAR },
+        { L"msctls_trackbar32", BRIDGE_ROLE_SLIDER },
+        { L"msctls_updown32", BRIDGE_ROLE_SPIN_BUTTON },
+        { L"RICHEDIT50W", BRIDGE_ROLE_TEXT },
+        { L"RichEdit20A", BRIDGE_ROLE_TEXT },
+        { L"RichEdit20W", BRIDGE_ROLE_TEXT },
+        { L"ScrollBar", BRIDGE_ROLE_SCROLL_BAR },
+        { L"Static", BRIDGE_ROLE_LABEL },
+        { L"SysListView32", BRIDGE_ROLE_LIST },
+        { L"SysTabControl32", BRIDGE_ROLE_PAGE_TAB_LIST },
+        { L"SysTreeView32", BRIDGE_ROLE_TREE },
+        { L"ToolbarWindow32", BRIDGE_ROLE_TOOL_BAR },
+    };
+    unsigned int i;
+
+    if (!lstrcmpiW(cls, L"Button"))
+    {
+        switch (GetWindowLongW(hwnd, GWL_STYLE) & BS_TYPEMASK)
+        {
+        case BS_CHECKBOX:
+        case BS_AUTOCHECKBOX:
+        case BS_3STATE:
+        case BS_AUTO3STATE:
+            return BRIDGE_ROLE_CHECK_BOX;
+        case BS_RADIOBUTTON:
+        case BS_AUTORADIOBUTTON:
+            return BRIDGE_ROLE_RADIO_BUTTON;
+        case BS_GROUPBOX:
+            return BRIDGE_ROLE_GROUPING;
+        }
+        return BRIDGE_ROLE_PUSH_BUTTON;
+    }
+    for (i = 0; i < ARRAYSIZE(map); i++)
+        if (!lstrcmpiW(cls, map[i].cls))
+            return map[i].role;
+    return BRIDGE_ROLE_UNKNOWN;
+}
+
+/* States MSAA does not report for a window handled by role_from_class. */
+static void refine_class_states(HWND hwnd, struct bridge_object *obj)
+{
+    DWORD_PTR check = 0;
+
+    if (obj->role != BRIDGE_ROLE_CHECK_BOX && obj->role != BRIDGE_ROLE_RADIO_BUTTON)
+        return;
+    SendMessageTimeoutW(hwnd, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 500, &check);
+    if (check == BST_CHECKED)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_CHECKED);
+    else if (check == BST_INDETERMINATE)
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_INDETERMINATE);
+}
+
+/* Screen rectangle of a whole window. */
+void get_extents(HWND hwnd, struct bridge_object *obj)
+{
+    RECT rect;
+
+    obj->has_extents = GetWindowRect(hwnd, &rect);
+    if (!obj->has_extents)
+        return;
+    obj->x = rect.left;
+    obj->y = rect.top;
+    obj->width = rect.right - rect.left;
+    obj->height = rect.bottom - rect.top;
+}
+
+/* rect in the client coordinates of hwnd as x, y, width and height on the screen. */
+void client_to_screen(HWND hwnd, RECT rect, int *out)
+{
+    MapWindowPoints(hwnd, HWND_DESKTOP, (POINT *)&rect, 2);
+    out[0] = rect.left;
+    out[1] = rect.top;
+    out[2] = rect.right - rect.left;
+    out[3] = rect.bottom - rect.top;
+}
+
+/* Screen rectangle of an item, from rect in the client coordinates of its list. */
+void set_item_extents(HWND hwnd, RECT rect, struct bridge_object *obj)
+{
+    int r[4];
+
+    client_to_screen(hwnd, rect, r);
+    obj->has_extents = TRUE;
+    obj->x = r[0];
+    obj->y = r[1];
+    obj->width = r[2];
+    obj->height = r[3];
+}
+
+/* MSAA only says "text"; the window style tells entry from multi-line. */
+static void refine_text(HWND hwnd, LONG msaa_state, struct bridge_object *obj)
+{
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+
+    if (!(msaa_state & STATE_SYSTEM_READONLY))
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_EDITABLE);
+    if (style & ES_MULTILINE)
+    {
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_MULTI_LINE);
+        return;
+    }
+    obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SINGLE_LINE);
+    obj->role = (msaa_state & STATE_SYSTEM_PROTECTED) || (style & ES_PASSWORD)
+                    ? BRIDGE_ROLE_PASSWORD_TEXT : BRIDGE_ROLE_ENTRY;
+}
+
+int bridge_click(unsigned long long handle)
+{
+    HWND hwnd = (HWND)(ULONG_PTR)handle;
+    WCHAR cls[16];
+
+    if (!hwnd || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"Button") ||
+        (GetWindowLongW(hwnd, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX ||
+        !IsWindowVisible(hwnd) || !IsWindowEnabled(hwnd))
+        return 0;
+    /*
+     * Wine's BM_CLICK sends the button WM_LBUTTONDOWN and WM_LBUTTONUP
+     * (user32/button.c), which focus it and notify BN_CLICKED. Posted,
+     * because the click may open a modal dialog.
+     */
+    return PostMessageW(hwnd, BM_CLICK, 0, 0);
+}
+
+BOOL is_list_box(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"ListBox") || !lstrcmpiW(cls, L"ComboLBox");
+}
+
+BOOL is_tree_view(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"SysTreeView32");
+}
+
+BOOL is_tab_control(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"SysTabControl32");
+}
+
+/* A control whose items the bridge reads with messages: a list, list view, tree view or tab control. */
+BOOL is_item_control(const WCHAR *cls)
+{
+    return is_list_box(cls) || !lstrcmpiW(cls, L"SysListView32") || is_tree_view(cls) ||
+           is_tab_control(cls);
+}
+
+/*
+ * Fills obj from MSAA and the window class; the strings point into str.
+ * FALSE if MSAA failed.
+ */
+BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
+                            struct bridge_object *obj, struct focus_strings *str)
+{
+    IAccessible *acc = NULL;
+    VARIANT child, role, state;
+    BSTR name = NULL;
+    LONG msaa_state = 0;
+    WCHAR cls[256];
+    BOOL listview, listbox;
+    HWND updown;
+
+    get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
+    obj->window_class = str->object_class;
+    obj->text = NULL;
+    str->text = NULL;
+    obj->position = obj->set_size = obj->level = obj->column_count = 0;
+    obj->columns = NULL;
+    obj->has_range = FALSE;
+    obj->has_extents = FALSE;
+    if (id_object == OBJID_CLIENT && !lstrcmpW(cls, CONSOLE_CLASS))
+        return describe_console(hwnd, obj, str);
+    if (id_object == OBJID_CLIENT && is_tree_view(cls))
+    {
+        /* Only the caret item can have focus; the child id just names it. */
+        HTREEITEM item;
+
+        if (tree_focus(hwnd, &item) == LIST_BUSY)
+            return FALSE;
+        if (item)
+            return describe_treeview_item(hwnd, item, obj, str);
+    }
+    if (id_object == OBJID_CLIENT && is_tab_control(cls))
+    {
+        int item = id_child > 0 ? id_child - 1 : tab_focus(hwnd);
+
+        if (item == LIST_BUSY)
+            return FALSE;
+        if (item >= 0)
+            return describe_tab_item(hwnd, item, obj, str);
+    }
+    if (id_object == OBJID_CLIENT && is_toolbar(cls))
+    {
+        /* The focus of a toolbar is its hot button, see toolbar_focus. */
+        int item = id_child > 0 ? id_child - 1 : toolbar_focus(hwnd);
+
+        if (item == LIST_BUSY)
+            return FALSE;
+        if (item >= 0 && describe_toolbar_button(hwnd, item, obj, str) == TRUE)
+            return TRUE;
+    }
+    listview = id_object == OBJID_CLIENT && !lstrcmpiW(cls, L"SysListView32");
+    if (listview)
+    {
+        int item = id_child > 0 ? id_child - 1 : listview_focus(hwnd);
+
+        if (item >= 0)
+            return describe_listview_item(hwnd, item, obj, str);
+    }
+    listbox = id_object == OBJID_CLIENT && is_list_box(cls);
+    if (listbox && id_child > 0)
+    {
+        /*
+         * Wine reports focus_item + 1 even for an empty list
+         * (listbox.c, WM_SETFOCUS); then the list itself is described.
+         */
+        int ret = describe_listbox_item(hwnd, id_child - 1, obj, str);
+
+        if (ret == LIST_BUSY)
+            return FALSE;
+        if (ret)
+            return TRUE;
+        id_child = CHILDID_SELF;
+    }
+    VariantInit(&child);
+    if (FAILED(AccessibleObjectFromEvent(hwnd, id_object, id_child, &acc, &child)) || !acc)
+        return FALSE;
+
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = V_VT(&child) == VT_I4 ? V_I4(&child) : 0;
+    if (FAILED(IAccessible_get_accName(acc, child, &name)))
+        name = NULL;
+    to_utf8(name, str->object, sizeof(str->object));
+    obj->name = str->object;
+    obj->value = NULL;
+    VariantInit(&role);
+    IAccessible_get_accRole(acc, child, &role);
+    obj->role = BRIDGE_ROLE_UNKNOWN;
+    if (V_VT(&role) == VT_I4 && V_I4(&role) != ROLE_SYSTEM_CLIENT)
+        obj->role = map_role(V_I4(&role));
+    VariantInit(&state);
+    if (SUCCEEDED(IAccessible_get_accState(acc, child, &state)) && V_VT(&state) == VT_I4)
+        msaa_state = V_I4(&state);
+    obj->states = map_states(msaa_state);
+    if (obj->role == BRIDGE_ROLE_UNKNOWN && !obj->child)
+    {
+        obj->role = role_from_class(hwnd, cls);
+        refine_class_states(hwnd, obj);
+    }
+    if (obj->role == BRIDGE_ROLE_UNKNOWN)
+        obj->role = BRIDGE_ROLE_PANEL;
+    if (obj->role == BRIDGE_ROLE_TEXT)
+        refine_text(hwnd, msaa_state, obj);
+    if (!obj->child && obj->role == BRIDGE_ROLE_ENTRY && (updown = find_updown(hwnd)))
+    {
+        obj->role = BRIDGE_ROLE_SPIN_BUTTON;
+        describe_range(updown, L"msctls_updown32", obj);
+    }
+    else if (!obj->child && (obj->role == BRIDGE_ROLE_SLIDER ||
+                             obj->role == BRIDGE_ROLE_PROGRESS_BAR ||
+                             obj->role == BRIDGE_ROLE_SPIN_BUTTON))
+        describe_range(hwnd, cls, obj);
+    if (!obj->child && has_edit_text(cls) &&
+        (obj->role == BRIDGE_ROLE_TEXT || obj->role == BRIDGE_ROLE_ENTRY ||
+         obj->role == BRIDGE_ROLE_PASSWORD_TEXT || obj->role == BRIDGE_ROLE_SPIN_BUTTON))
+    {
+        BOOL rich = lstrcmpiW(cls, L"Edit") != 0;
+
+        /*
+         * Wine's oleacc has no proxy for a RichEdit and names it by its
+         * window text, the whole document. Orca presents every name change
+         * of the focused object, so it would read the text after each key.
+         */
+        if (rich)
+            str->object[0] = 0;
+        describe_edit_text(hwnd, rich, obj, str);
+    }
+    if (obj->role == BRIDGE_ROLE_COMBO_BOX)
+    {
+        /*
+         * Wine's oleacc names a combo box by its current text. Orca reads a
+         * combo box value from "valuetext" and ignores name changes of a
+         * focused combo box, so the text is the value, not the name.
+         */
+        lstrcpyA(str->value, str->object);
+        obj->value = str->value;
+        str->object[0] = 0;
+    }
+    if (!str->object[0] && !obj->child && needs_label(obj->role))
+        find_label(hwnd, str->object, sizeof(str->object));
+    if ((listview || listbox) && !obj->child)
+        describe_list_box(hwnd, listview, obj, str);
+    if (!obj->child)
+        get_extents(hwnd, obj);
+
+    SysFreeString(name);
+    VariantClear(&role);
+    VariantClear(&state);
+    VariantClear(&child);
+    IAccessible_Release(acc);
+    return TRUE;
+}
+
+void describe_frame(HWND hwnd, struct bridge_object *obj,
+                           struct focus_strings *str)
+{
+    WCHAR cls[256];
+
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->child = 0;
+    get_class(hwnd, cls, ARRAYSIZE(cls), str->frame_class, sizeof(str->frame_class));
+    obj->window_class = str->frame_class;
+    obj->role = !lstrcmpW(cls, L"#32770") ? BRIDGE_ROLE_DIALOG : BRIDGE_ROLE_FRAME;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
+    get_window_text(hwnd, str->frame, sizeof(str->frame));
+    obj->name = str->frame;
+    get_extents(hwnd, obj);
+}
