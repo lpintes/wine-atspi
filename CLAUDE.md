@@ -241,6 +241,28 @@ Found with the bridge's autostart (`build/exp-autostart/`, prefix
 - Confirmed with Orca (2026-11-07): after `wine-atspi install`, a plain
   `wine regedit` is accessible without `bridge.sh`.
 
+Found with the listener watch (`tests/bridge-listeners.sh`,
+at-spi2-core 2.62.1, Orca 51.1, 2026-11-16).
+
+- The bridge hooks nothing while no AT-SPI client listens to events: a
+  global `WH_CALLWNDPROC` costs every GUI process two wineserver
+  requests per sent message (`dlls/win32u/hook.c`,
+  `call_message_hooks`). `org.a11y.Status` cannot tell: it has only
+  `IsEnabled` (no `ScreenReaderEnabled`), which Orca sets at start
+  (`orca.py`, `_ensure_accessibility_enabled`) and never clears.
+- The registry tells instead: `GetRegisteredEvents` on
+  `/org/a11y/atspi/registry` (`a(ss)`: bus, event such as
+  `Object:StateChanged:Focused`) and the signals
+  `EventListenerRegistered` / `EventListenerDeregistered`. A client that
+  dies (even `kill -9`) is deregistered with an empty event. The AT-SPI
+  side asks again on each signal (`watch_listeners` in `atspi.c`) and
+  calls `bridge_set_listening`; the main thread then installs all hooks
+  and reports the current focus, or removes them, forgets its state and
+  drops every application (`start_watching`, `stop_watching` in
+  `main.c`).
+- Tests that only dump the tree have no listener, so all tests start
+  the bridge with `--always-on`. Not yet confirmed with Orca.
+
 ## Verified in Orca's source
 
 Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,

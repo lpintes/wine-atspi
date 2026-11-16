@@ -290,6 +290,13 @@ void atspi_post_window_gone(unsigned long long hwnd);
 void atspi_post_app_gone(unsigned int pid);
 
 /*
+ * Forgets everything: every application leaves the desktop, as by
+ * atspi_post_app_gone. For when the Win32 side stops watching. Callable
+ * from any thread.
+ */
+void atspi_post_reset(void);
+
+/*
  * Implemented by the Win32 side for what the AT-SPI side cannot keep in
  * its model. Called on the AT-SPI thread when a screen reader asks.
  */
@@ -312,5 +319,13 @@ int bridge_text_extents(unsigned long long hwnd, const unsigned int *chars, int 
  * program to handle it. Returns 0 if hwnd is no enabled button.
  */
 int bridge_click(unsigned long long hwnd);
+
+/*
+ * Whether anyone listens to AT-SPI events, i.e. the registry knows at
+ * least one event listener (a screen reader, Accerciser, ...). Called on
+ * the AT-SPI thread once the first answer arrives and on each change;
+ * must not block. Without a listener the Win32 side need not watch.
+ */
+void bridge_set_listening(int listening);
 
 #endif

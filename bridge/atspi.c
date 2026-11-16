@@ -2603,6 +2603,107 @@ void atspi_post_app_gone(unsigned int pid)
     post(app_gone_idle, GUINT_TO_POINTER(pid), NULL);
 }
 
+static gboolean reset_idle(gpointer data)
+{
+    GHashTableIter iter;
+    gpointer value;
+
+    g_hash_table_iter_init(&iter, apps);
+    while (g_hash_table_iter_next(&iter, NULL, &value))
+    {
+        g_hash_table_iter_steal(&iter);
+        app_close(value);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+void atspi_post_reset(void)
+{
+    post(reset_idle, NULL, NULL);
+}
+
+/*
+ * Connection that watches the registry's event listeners: without one
+ * nobody hears the bridge, and its hooks only cost the targets time.
+ */
+static GDBusConnection *watch_conn;
+static int listening = -1;          /* not known yet */
+
+static void tell_listening(int on)
+{
+    if (on == listening)
+        return;
+    listening = on;
+    g_printerr("wine-atspi: %s\n", on ? "event listeners present" : "no event listeners");
+    bridge_set_listening(on);
+}
+
+static void got_listeners(GObject *source, GAsyncResult *result, gpointer data)
+{
+    GError *error = NULL;
+    GVariant *ret = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), result, &error);
+    GVariant *events;
+
+    if (!ret)
+    {
+        /* Better to watch for nobody than to stay silent for a screen reader. */
+        g_printerr("wine-atspi: cannot list event listeners: %s\n", error->message);
+        g_error_free(error);
+        tell_listening(1);
+        return;
+    }
+    events = g_variant_get_child_value(ret, 0);
+    tell_listening(g_variant_n_children(events) > 0);
+    g_variant_unref(events);
+    g_variant_unref(ret);
+}
+
+static void ask_listeners(void)
+{
+    /* Replies come in call order, so the last one is the current state. */
+    g_dbus_connection_call(watch_conn, "org.a11y.atspi.Registry", "/org/a11y/atspi/registry",
+                           "org.a11y.atspi.Registry", "GetRegisteredEvents", NULL,
+                           G_VARIANT_TYPE("(a(ss))"), G_DBUS_CALL_FLAGS_NONE, -1, NULL,
+                           got_listeners, NULL);
+}
+
+/*
+ * EventListenerRegistered (bus, event, properties) or
+ * EventListenerDeregistered (bus, event); the registry also deregisters
+ * all events of a client that leaves the bus, with an empty event.
+ */
+static void listeners_changed(GDBusConnection *conn, const char *sender, const char *path,
+                              const char *iface, const char *signal, GVariant *params,
+                              gpointer data)
+{
+    ask_listeners();
+}
+
+/* Runs on the AT-SPI thread, so the signals are dispatched there. */
+static void watch_listeners(void)
+{
+    GError *error = NULL;
+
+    watch_conn = g_dbus_connection_new_for_address_sync(
+        a11y_address,
+        G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
+            G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
+        NULL, NULL, &error);
+    if (!watch_conn)
+    {
+        g_printerr("wine-atspi: no connection to watch listeners: %s\n", error->message);
+        g_error_free(error);
+        tell_listening(1);
+        return;
+    }
+    /* Subscribed before the first question, so no change slips between. */
+    g_dbus_connection_signal_subscribe(watch_conn, "org.a11y.atspi.Registry",
+                                       "org.a11y.atspi.Registry", NULL,
+                                       "/org/a11y/atspi/registry", NULL,
+                                       G_DBUS_SIGNAL_FLAGS_NONE, listeners_changed, NULL, NULL);
+    ask_listeners();
+}
+
 int atspi_init(void)
 {
     GError *error = NULL;
@@ -2640,5 +2741,6 @@ void atspi_run(void)
 {
     /* All D-Bus dispatching of the per-process connections happens here. */
     g_main_context_push_thread_default(context);
+    watch_listeners();
     g_main_loop_run(g_main_loop_new(context, FALSE));
 }

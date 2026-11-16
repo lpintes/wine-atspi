@@ -212,18 +212,22 @@ static LRESULT CALLBACK menu_sink_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARA
     return TRUE;
 }
 
+static HMODULE menu_module;
+static HOOKPROC menu_proc;
+
 /*
- * Creates the record sink and installs the hook DLL that lies next to the
- * executable. Without it the bridge runs on, just without menus.
+ * Creates the record sink and loads the hook DLL that lies next to the
+ * executable, once. Without it the bridge runs on, just without menus.
  */
-HHOOK install_menu_hook(void)
+static BOOL load_menu_hook(void)
 {
+    static BOOL tried;
     WNDCLASSW wc;
     WCHAR path[MAX_PATH], *base = path, *p;
-    HMODULE module;
-    HOOKPROC proc;
-    HHOOK hook;
 
+    if (tried)
+        return menu_proc != NULL;
+    tried = TRUE;
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = menu_sink_proc;
     wc.hInstance = GetModuleHandleW(NULL);
@@ -231,20 +235,38 @@ HHOOK install_menu_hook(void)
     if (!RegisterClassW(&wc) ||
         !CreateWindowExW(0, MENU_SINK_CLASS, L"", WS_POPUP, 0, 0, 0, 0, NULL, NULL,
                          wc.hInstance, NULL))
-        return NULL;
+        return FALSE;
     if (!GetModuleFileNameW(NULL, path, ARRAYSIZE(path) - 32))
-        return NULL;
+        return FALSE;
     for (p = path; *p; p++)
         if (*p == '\\' || *p == '/')
             base = p + 1;
     lstrcpyW(base, L"wine-atspi-hook.dll");
-    if (!(module = LoadLibraryW(path)) ||
-        !(proc = (HOOKPROC)GetProcAddress(module, "CallWndProc")))
+    if (!(menu_module = LoadLibraryW(path)) ||
+        !(menu_proc = (HOOKPROC)GetProcAddress(menu_module, "CallWndProc")))
     {
         trace(L"no menu hook: cannot load %s", path);
-        return NULL;
+        return FALSE;
     }
-    hook = SetWindowsHookExW(WH_CALLWNDPROC, proc, module, 0);
-    trace(L"menu hook %s: %p", path, hook);
+    return TRUE;
+}
+
+/* Installs the hook DLL as a global WH_CALLWNDPROC hook; NULL without it. */
+HHOOK install_menu_hook(void)
+{
+    HHOOK hook;
+
+    if (!load_menu_hook())
+        return NULL;
+    hook = SetWindowsHookExW(WH_CALLWNDPROC, menu_proc, menu_module, 0);
+    trace(L"menu hook: %p", hook);
     return hook;
+}
+
+/* The hook is gone: drop a pending record and the menu mode. */
+void forget_menu(void)
+{
+    if (menu.timer)
+        KillTimer(NULL, menu.timer);
+    memset(&menu, 0, sizeof(menu));
 }

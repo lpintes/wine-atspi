@@ -16,7 +16,7 @@ SK="timeout 60 wine $BUILD/sendkeys.exe.so"
 wine $BUILD/wine-atspi.exe.so uninstall > /dev/null 2>&1
 wineserver -k; wineserver -w
 
-WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
+WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so --always-on > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
 python3 tests/atspi-events.py 25 > "$LOG" 2>&1 &

@@ -293,6 +293,17 @@ void CALLBACK refresh_tree(HWND unused, UINT msg, UINT_PTR id, DWORD time)
         report_tree(tree_top, NULL, TRUE);
 }
 
+/* Nobody listens any more: no tree is known, none waits. */
+void forget_tree(void)
+{
+    if (tree_timer)
+        KillTimer(NULL, tree_timer);
+    if (items_timer)
+        KillTimer(NULL, items_timer);
+    tree_timer = items_timer = 0;
+    tree_top = items_control = NULL;
+}
+
 /* Something changed in window hwnd: refresh the tree if hwnd is in it. */
 void schedule_tree(HWND hwnd)
 {

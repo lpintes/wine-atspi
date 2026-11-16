@@ -200,6 +200,8 @@ struct menu_state
 
 /* Sent to the main thread when a watched process ends, see watch_process. */
 #define WM_PROCESS_EXITED (WM_APP + 1)
+/* Sent to the main thread when listeners come or go, see bridge_set_listening. */
+#define WM_LISTENING (WM_APP + 2)
 
 /*
  * Wine emits no WinEvent when a key changes a combo box, a list box
@@ -292,6 +294,7 @@ void report_tree(HWND top, HWND control, BOOL items);
 void CALLBACK refresh_tree(HWND unused, UINT msg, UINT_PTR id, DWORD time);
 void schedule_tree(HWND hwnd);
 void schedule_items(HWND hwnd);
+void forget_tree(void);
 
 /* events.c */
 extern DWORD main_thread_id;
@@ -303,6 +306,7 @@ void watch_process(DWORD pid);
 void on_process_exited(DWORD pid);
 void on_focus(HWND hwnd, LONG id_object, LONG id_child);
 BOOL check_missed_focus(void);
+void forget_focus(void);
 void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time);
 void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
                              LONG id_object, LONG id_child,
@@ -312,6 +316,7 @@ void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
 extern struct menu_state menu;
 BOOL still_in_menu(void);
 HHOOK install_menu_hook(void);
+void forget_menu(void);
 
 /* keys.c */
 LRESULT CALLBACK keyboard_proc(int code, WPARAM wparam, LPARAM lparam);

@@ -45,11 +45,81 @@ static HANDLE make_system_process(void)
     return status ? NULL : event;
 }
 
-/* Runs the bridge until the session shuts down or WM_QUIT arrives. */
-static int run_bridge(BOOL service)
+/*
+ * The hooks, installed only while someone listens to AT-SPI events. A
+ * global WH_CALLWNDPROC costs every GUI process of the prefix two
+ * wineserver requests per sent message, the other hooks a round trip to
+ * the bridge per key or event.
+ */
+static struct
 {
-    HWINEVENTHOOK hook, foreground_hook, value_hook;
-    HHOOK keyboard, menu_hook;
+    BOOL on;
+    HWINEVENTHOOK focus, foreground, value;
+    HHOOK keyboard, menu;
+} hooks;
+
+void bridge_set_listening(int listening)
+{
+    /* Called on the AT-SPI thread; the main thread has its queue already. */
+    PostThreadMessageW(main_thread_id, WM_LISTENING, listening, 0);
+}
+
+static void stop_watching(void)
+{
+    if (!hooks.on)
+        return;
+    if (hooks.menu)
+        UnhookWindowsHookEx(hooks.menu);
+    if (hooks.keyboard)
+        UnhookWindowsHookEx(hooks.keyboard);
+    if (hooks.value)
+        UnhookWinEvent(hooks.value);
+    if (hooks.foreground)
+        UnhookWinEvent(hooks.foreground);
+    if (hooks.focus)
+        UnhookWinEvent(hooks.focus);
+    memset(&hooks, 0, sizeof(hooks));
+    forget_focus();
+    atspi_post_reset();
+    trace(L"hooks removed");
+}
+
+/* Installs the hooks and reports the current focus. FALSE if one failed. */
+static BOOL start_watching(void)
+{
+    if (hooks.on)
+        return TRUE;
+    hooks.on = TRUE;
+    /* EVENT_OBJECT_DESTROY .. EVENT_OBJECT_FOCUS includes HIDE. */
+    hooks.focus = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_FOCUS, NULL,
+                                  win_event_proc, 0, 0,
+                                  WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    hooks.foreground = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL,
+                                       win_event_proc, 0, 0,
+                                       WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    /* LOCATIONCHANGE .. VALUECHANGE includes NAMECHANGE, for the window tree. */
+    hooks.value = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_VALUECHANGE, NULL,
+                                  win_event_proc, 0, 0,
+                                  WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    hooks.keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, GetModuleHandleW(NULL), 0);
+    if (!hooks.focus || !hooks.foreground || !hooks.value || !hooks.keyboard)
+    {
+        stop_watching();
+        return FALSE;
+    }
+    hooks.menu = install_menu_hook();
+    trace(L"hooks installed");
+    check_missed_focus();
+    return TRUE;
+}
+
+/*
+ * Runs the bridge until the session shuts down or WM_QUIT arrives. With
+ * always_on the hooks stay even when nobody listens (tests that only
+ * read the tree).
+ */
+static int run_bridge(BOOL service, BOOL always_on)
+{
     HANDLE thread, shutdown_event = NULL;
     DWORD wait;
     MSG msg;
@@ -66,32 +136,14 @@ static int run_bridge(BOOL service)
     main_thread_id = GetCurrentThreadId();
     if (atspi_init())
         return 1;
+    /* The message queue, before the AT-SPI thread posts WM_LISTENING to it. */
+    PeekMessageW(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (always_on && !start_watching())
+        return 1;
     thread = CreateThread(NULL, 0, atspi_thread, NULL, 0, NULL);
     if (!thread)
         return 1;
-
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    /* EVENT_OBJECT_DESTROY .. EVENT_OBJECT_FOCUS includes HIDE. */
-    hook = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_FOCUS, NULL,
-                           win_event_proc, 0, 0,
-                           WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    if (!hook)
-        return 1;
-    foreground_hook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL,
-                                      win_event_proc, 0, 0,
-                                      WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    if (!foreground_hook)
-        return 1;
-    /* LOCATIONCHANGE .. VALUECHANGE includes NAMECHANGE, for the window tree. */
-    value_hook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_VALUECHANGE, NULL,
-                                 win_event_proc, 0, 0,
-                                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    if (!value_hook)
-        return 1;
-    keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, GetModuleHandleW(NULL), 0);
-    if (!keyboard)
-        return 1;
-    menu_hook = install_menu_hook();
 
     for (;;)
     {
@@ -112,17 +164,22 @@ static int run_bridge(BOOL service)
                 on_process_exited((DWORD)msg.wParam);
                 continue;
             }
+            if (!msg.hwnd && msg.message == WM_LISTENING)
+            {
+                if (always_on)
+                    continue;
+                if (!msg.wParam)
+                    stop_watching();
+                else if (!start_watching())
+                    trace(L"cannot install the hooks");
+                continue;
+            }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
     }
 done:
-    if (menu_hook)
-        UnhookWindowsHookEx(menu_hook);
-    UnhookWindowsHookEx(keyboard);
-    UnhookWinEvent(value_hook);
-    UnhookWinEvent(foreground_hook);
-    UnhookWinEvent(hook);
+    stop_watching();
     CoUninitialize();
     return 0;
 }
@@ -213,9 +270,10 @@ static int uninstall(void)
 
 static int usage(void)
 {
-    print_line(L"usage: wine-atspi [--service] [--log FILE]   run the bridge");
+    print_line(L"usage: wine-atspi [--service] [--always-on] [--log FILE]   run the bridge");
     print_line(L"       wine-atspi install [--log FILE]       start it with every session");
     print_line(L"       wine-atspi uninstall");
+    print_line(L"--always-on watches the programs even when no AT-SPI client listens.");
     return 2;
 }
 
@@ -226,7 +284,7 @@ static int usage(void)
 int main(void)
 {
     const WCHAR *command = NULL, *log_path = NULL;
-    BOOL service = FALSE;
+    BOOL service = FALSE, always_on = FALSE;
     WCHAR **argv;
     int argc, i;
 
@@ -237,6 +295,8 @@ int main(void)
     {
         if (!lstrcmpW(argv[i], L"--service"))
             service = TRUE;
+        else if (!lstrcmpW(argv[i], L"--always-on"))
+            always_on = TRUE;
         else if (!lstrcmpW(argv[i], L"--log") && i + 1 < argc)
             log_path = argv[++i];
         else if (!command && (!lstrcmpW(argv[i], L"install") || !lstrcmpW(argv[i], L"uninstall")))
@@ -245,9 +305,9 @@ int main(void)
             return usage();
     }
     if (command && !lstrcmpW(command, L"install"))
-        return service ? usage() : install(log_path);
+        return service || always_on ? usage() : install(log_path);
     if (command)
-        return service || log_path ? usage() : uninstall();
+        return service || always_on || log_path ? usage() : uninstall();
 
     trace_handle = GetStdHandle(STD_ERROR_HANDLE);
     debug = GetEnvironmentVariableW(L"WINE_ATSPI_DEBUG", NULL, 0) > 0;
@@ -265,5 +325,5 @@ int main(void)
         debug = TRUE;
     }
     trace(L"bridge %lu starts%s", GetCurrentProcessId(), service ? L" as a service" : L"");
-    return run_bridge(service);
+    return run_bridge(service, always_on);
 }

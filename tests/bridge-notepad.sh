@@ -19,7 +19,7 @@ wineserver -k; wineserver -w
 wine reg delete 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedMRU' \
     /f > /dev/null 2>&1
 
-WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so > $BUILD/bridge.log 2>&1 &
+WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so --always-on > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
 python3 tests/atspi-events.py 32 > "$LOG" 2>&1 &

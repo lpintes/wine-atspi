@@ -429,3 +429,26 @@ void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         break;
     }
 }
+
+/*
+ * The hooks are gone because nobody listens: drop what waits and what
+ * is known, so that watching again starts afresh.
+ */
+void forget_focus(void)
+{
+    UINT_PTR *timers[] = { &focus_timer, &foreground_timer, &key_timer, &console_timer };
+    unsigned int i;
+
+    for (i = 0; i < ARRAYSIZE(timers); i++)
+    {
+        if (*timers[i])
+            KillTimer(NULL, *timers[i]);
+        *timers[i] = 0;
+    }
+    key_retries = 0;
+    memset(&pending_focus, 0, sizeof(pending_focus));
+    memset(&last_focus, 0, sizeof(last_focus));
+    last_status.hwnd = NULL;
+    forget_tree();
+    forget_menu();
+}
