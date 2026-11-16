@@ -251,19 +251,126 @@ const struct item_handler *find_item_handler(const WCHAR *cls)
 }
 
 /*
- * Fills obj from MSAA and the window class; the strings point into str.
- * FALSE if MSAA failed.
+ * Name, role and states of an MSAA object; the role stays unknown for a
+ * plain client. FALSE if MSAA failed.
+ */
+static BOOL describe_msaa(HWND hwnd, LONG id_object, LONG id_child,
+                          struct bridge_object *obj, struct focus_strings *str,
+                          LONG *msaa_state)
+{
+    IAccessible *acc = NULL;
+    VARIANT child, role, state;
+    BSTR name = NULL;
+
+    /*
+     * Wine's oleacc sends WM_GETOBJECT and WM_GETTEXT without a timeout
+     * (dlls/oleacc/main.c, client.c), so a busy target would block the
+     * bridge. Ask it once with a timeout first.
+     */
+    if (!send_message(hwnd, WM_NULL, 0, 0, SEND_TIMEOUT_MS, NULL))
+        return FALSE;
+    VariantInit(&child);
+    if (FAILED(AccessibleObjectFromEvent(hwnd, id_object, id_child, &acc, &child)) || !acc)
+        return FALSE;
+
+    obj->child = V_VT(&child) == VT_I4 ? V_I4(&child) : 0;
+    if (FAILED(IAccessible_get_accName(acc, child, &name)))
+        name = NULL;
+    to_utf8(name, str->object, sizeof(str->object));
+    VariantInit(&role);
+    IAccessible_get_accRole(acc, child, &role);
+    obj->role = BRIDGE_ROLE_UNKNOWN;
+    if (V_VT(&role) == VT_I4 && V_I4(&role) != ROLE_SYSTEM_CLIENT)
+        obj->role = map_role(V_I4(&role));
+    VariantInit(&state);
+    if (SUCCEEDED(IAccessible_get_accState(acc, child, &state)) && V_VT(&state) == VT_I4)
+        *msaa_state = V_I4(&state);
+
+    SysFreeString(name);
+    VariantClear(&role);
+    VariantClear(&state);
+    VariantClear(&child);
+    IAccessible_Release(acc);
+    return TRUE;
+}
+
+/*
+ * What Wine's oleacc gives for a whole window of a standard class, without
+ * MSAA: it has no proxy for them (only the Edit has its own vtbl in
+ * dlls/oleacc/client.c), and its WM_GETOBJECT and WM_GETTEXT have no
+ * timeout. Name from the window text without the "&" of the mnemonic
+ * (an Edit is named by its Static), states from the window style. The role
+ * is left unknown, role_from_class gives it. FALSE if the target is busy.
+ */
+static BOOL describe_window(HWND hwnd, const WCHAR *cls, struct bridge_object *obj,
+                            struct focus_strings *str, LONG *msaa_state)
+{
+    GUITHREADINFO info = { sizeof(info) };
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    WCHAR buf[NAME_MAX_UTF8 / 3];
+    BOOL edit = !lstrcmpiW(cls, L"Edit");
+
+    obj->child = 0;
+    obj->role = BRIDGE_ROLE_UNKNOWN;
+    str->object[0] = 0;
+    buf[0] = 0;
+    if (has_edit_text(cls))
+    {
+        /*
+         * The text is read next, so a busy target must fail here and be
+         * asked again (the Open dialog's file name field while the dialog
+         * is created). A RichEdit's window text is the whole document,
+         * which is not its name.
+         */
+        if (!send_message(hwnd, WM_NULL, 0, 0, SEND_TIMEOUT_MS, NULL))
+            return FALSE;
+        if (edit)
+            edit_label(hwnd, str->object, sizeof(str->object));
+    }
+    else if (!lstrcmpiW(cls, L"Static") || !lstrcmpiW(cls, L"Button"))
+    {
+        /* They keep their text in the window, so no message is needed. */
+        InternalGetWindowText(hwnd, buf, ARRAYSIZE(buf));
+        strip_mnemonic(hwnd, buf);
+    }
+    else
+    {
+        if (!send_message(hwnd, WM_GETTEXT, ARRAYSIZE(buf), (LPARAM)buf, SEND_TIMEOUT_MS, NULL))
+            return FALSE;
+        buf[ARRAYSIZE(buf) - 1] = 0;
+        /* A combo box's text becomes its value, see describe_object. */
+        if (lstrcmpiW(cls, L"ComboBox") && lstrcmpiW(cls, L"ComboBoxEx32"))
+            strip_ampersands(buf);
+    }
+    if (buf[0])
+        to_utf8(buf, str->object, sizeof(str->object));
+
+    /* As client_get_state and edit_get_state in dlls/oleacc/client.c. */
+    *msaa_state = style & WS_DISABLED ? STATE_SYSTEM_UNAVAILABLE : STATE_SYSTEM_FOCUSABLE;
+    if (GetGUIThreadInfo(0, &info) && info.hwndFocus == hwnd)
+        *msaa_state |= STATE_SYSTEM_FOCUSED;
+    if (!(style & WS_VISIBLE))
+        *msaa_state |= STATE_SYSTEM_INVISIBLE;
+    if (edit && (style & ES_READONLY))
+        *msaa_state |= STATE_SYSTEM_READONLY;
+    if (edit && (style & ES_PASSWORD))
+        *msaa_state |= STATE_SYSTEM_PROTECTED;
+    return TRUE;
+}
+
+/*
+ * Fills obj from the window class and, for other classes and objects
+ * inside a window, from MSAA; the strings point into str. FALSE if the
+ * target is busy or MSAA failed.
  */
 BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
                             struct bridge_object *obj, struct focus_strings *str)
 {
     const struct item_handler *handler = NULL;
-    IAccessible *acc = NULL;
-    VARIANT child, role, state;
-    BSTR name = NULL;
     LONG msaa_state = 0;
     WCHAR cls[256];
     HWND updown;
+    BOOL ok;
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
     obj->window_class = str->object_class;
@@ -286,31 +393,20 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         id_child = CHILDID_SELF;
     }
     /*
-     * Wine's oleacc sends WM_GETOBJECT and WM_GETTEXT without a timeout
-     * (dlls/oleacc/main.c, client.c), so a busy target would block the
-     * bridge. Ask it once with a timeout first.
+     * A program may answer WM_GETOBJECT for a window of its own class, so
+     * MSAA stays for those. A standard class answers nothing of its own.
      */
-    if (!send_message(hwnd, WM_NULL, 0, 0, SEND_TIMEOUT_MS, NULL))
-        return FALSE;
-    VariantInit(&child);
-    if (FAILED(AccessibleObjectFromEvent(hwnd, id_object, id_child, &acc, &child)) || !acc)
+    if (id_object == OBJID_CLIENT && id_child == CHILDID_SELF &&
+        role_from_class(hwnd, cls) != BRIDGE_ROLE_UNKNOWN)
+        ok = describe_window(hwnd, cls, obj, str, &msaa_state);
+    else
+        ok = describe_msaa(hwnd, id_object, id_child, obj, str, &msaa_state);
+    if (!ok)
         return FALSE;
 
     obj->hwnd = (ULONG_PTR)hwnd;
-    obj->child = V_VT(&child) == VT_I4 ? V_I4(&child) : 0;
-    if (FAILED(IAccessible_get_accName(acc, child, &name)))
-        name = NULL;
-    to_utf8(name, str->object, sizeof(str->object));
     obj->name = str->object;
     obj->value = NULL;
-    VariantInit(&role);
-    IAccessible_get_accRole(acc, child, &role);
-    obj->role = BRIDGE_ROLE_UNKNOWN;
-    if (V_VT(&role) == VT_I4 && V_I4(&role) != ROLE_SYSTEM_CLIENT)
-        obj->role = map_role(V_I4(&role));
-    VariantInit(&state);
-    if (SUCCEEDED(IAccessible_get_accState(acc, child, &state)) && V_VT(&state) == VT_I4)
-        msaa_state = V_I4(&state);
     obj->states = map_states(msaa_state);
     if (obj->role == BRIDGE_ROLE_UNKNOWN && !obj->child)
     {
@@ -362,12 +458,6 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         handler->describe_self(hwnd, obj, str);
     if (!obj->child)
         get_extents(hwnd, obj);
-
-    SysFreeString(name);
-    VariantClear(&role);
-    VariantClear(&state);
-    VariantClear(&child);
-    IAccessible_Release(acc);
     return TRUE;
 }
 

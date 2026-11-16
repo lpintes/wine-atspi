@@ -257,6 +257,7 @@ BOOL has_edit_text(const WCHAR *cls);
 /* labels.c */
 BOOL needs_label(unsigned int role);
 void find_label(HWND hwnd, char *dst, int size);
+void edit_label(HWND hwnd, char *dst, int size);
 BOOL describe_label(HWND hwnd, char *dst, int size, struct bridge_object *obj);
 void describe_labels(HWND top, struct bridge_focus *focus, struct focus_strings *str);
 

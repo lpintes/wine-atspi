@@ -13,6 +13,8 @@
  */
 #define MAX_TREE 512
 #define TREE_REFRESH_MS 150
+/* How often a tree found busy is asked again before giving up. */
+#define TREE_BUSY_RETRIES 10
 
 enum tree_kind
 {
@@ -26,6 +28,7 @@ UINT_PTR tree_timer;
 /* Only the items of one control, see schedule_items. */
 static HWND items_control;
 static UINT_PTR items_timer;
+static int tree_busy_retries;
 
 static enum tree_kind tree_kind(HWND hwnd, const WCHAR *cls)
 {
@@ -258,6 +261,24 @@ void report_tree(HWND top, HWND control, BOOL items)
         }
         memset(&tree, 0, sizeof(tree));
         describe_frame(top, &tree.frame, b.str);
+        /*
+         * A busy target left windows out and gave the frame no name (the
+         * Open dialog while its file type combo refills the list): such a
+         * tree would remove them in Orca's view, so ask again later.
+         */
+        if (is_busy(top))
+        {
+            trace(L"tree: %p busy after %lu ms", top, GetTickCount() - start);
+            for (i = 0; i < b.count; i++)
+                free_kept_strings(&b.objects[i]);
+            if (top == tree_top && tree_busy_retries++ < TREE_BUSY_RETRIES)
+                tree_timer = SetTimer(NULL, tree_timer, TREE_REFRESH_MS, refresh_tree);
+            b.count = -1;
+        }
+    }
+    if (b.objects && b.parents && b.str && b.count >= 0)
+    {
+        tree_busy_retries = 0;
         tree.pid = pid;
         get_app_name(pid, b.str->app, sizeof(b.str->app));
         tree.app_name = b.str->app;

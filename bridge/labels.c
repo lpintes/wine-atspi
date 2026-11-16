@@ -82,6 +82,26 @@ void find_label(HWND hwnd, char *dst, int size)
 }
 
 /*
+ * Name of an Edit as Wine's oleacc gives it (edit_find_label in
+ * dlls/oleacc/client.c): the text of the nearest Static before it, hidden,
+ * empty and picture ones included. No WM_GETTEXT, see find_label.
+ */
+void edit_label(HWND hwnd, char *dst, int size)
+{
+    WCHAR cls[64], buf[NAME_MAX_UTF8 / 3];
+    HWND cur;
+
+    dst[0] = 0;
+    for (cur = GetWindow(hwnd, GW_HWNDPREV); cur; cur = GetWindow(cur, GW_HWNDPREV))
+        if (GetClassNameW(cur, cls, ARRAYSIZE(cls)) && !lstrcmpiW(cls, L"Static"))
+            break;
+    if (!cur || !InternalGetWindowText(cur, buf, ARRAYSIZE(buf)))
+        return;
+    strip_mnemonic(cur, buf);
+    to_utf8(buf, dst, size);
+}
+
+/*
  * A text Static that names the control after it, as find_label sees it:
  * the nearest visible sibling after it that is not a picture or empty
  * Static is a control that takes its name from a label.

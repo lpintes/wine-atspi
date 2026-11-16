@@ -1996,6 +1996,9 @@ static struct app *get_app(guint pid, const char *name)
 
     if (app)
         return app->conn ? app : NULL;
+    /* A window destroyed before it was described has no process. */
+    if (!pid)
+        return NULL;
 
     app = app_new(pid);
     app->root = node_new(app, "root", NULL);

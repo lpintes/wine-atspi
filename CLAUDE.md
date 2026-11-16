@@ -212,13 +212,21 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   queries can time out; the key check retries a busy list.
 - Wine's `oleacc` sends `WM_GETOBJECT` and `WM_GETTEXT` with plain
   `SendMessageW` (`dlls/oleacc/main.c`, `client.c`), so MSAA on a busy
-  target blocks the bridge. `describe_object` therefore asks with
-  `WM_NULL` and a timeout first. All messages go through `send_message`
+  target blocks the bridge. For a whole window of a class with a known
+  role `describe_object` skips MSAA and does what `oleacc` would
+  (`describe_window`: name from `WM_GETTEXT` with a timeout, an `Edit`
+  named by its `Static` as in `edit_find_label`, states from the style);
+  other classes ask with `WM_NULL` and a timeout before MSAA. The gain
+  in time is small (35 objects 190 -> 182 ms): the cost per window is
+  the cross-process messages. All messages go through `send_message`
   (`util.c`): after a timeout (Wine sets `ERROR_TIMEOUT` for a timeout
   and for a hung thread) the thread is skipped for 40 ms, so one pass
   waits once. Ctrl+O in notepad keeps its thread busy for over 500 ms
   while the Open dialog is created; a focus or key check that finds the
-  target busy is retried (`check_busy_focus`, `check_after_key`).
+  target busy is retried (`check_busy_focus`, `check_after_key`). A
+  window tree built while the target is busy lacks windows and the frame
+  name (Up in the Open dialog's file type combo refills the list), so
+  `report_tree` drops it and tries again after 150 ms, up to 10 times.
 - `atspi.c` uses only GLib functions, never libc ones directly. The
   binary imports msvcrt through Wine, and a libc name could bind to an
   ms_abi msvcrt thunk. Not proven to break, just avoided.
