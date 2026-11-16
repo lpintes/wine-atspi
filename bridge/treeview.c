@@ -28,7 +28,26 @@ struct tvitem32
 /* Bounds the walks over parents and siblings of a tree item. */
 #define TREE_WALK_MAX 10000
 
-HTREEITEM tree_next(HWND hwnd, UINT flag, HTREEITEM item)
+/*
+ * Level and siblings of the parents met in a walk over the visible items
+ * of a tree (TVGN_FIRSTVISIBLE, then TVGN_NEXTVISIBLE). Visible items come
+ * in tree order, so the next item with the same parent is the next
+ * sibling: its place follows without walking all siblings again, which
+ * costs one round trip each.
+ */
+#define TREE_CACHE_SIZE 8
+
+struct tree_cache
+{
+    struct
+    {
+        HTREEITEM parent;
+        int level, position, set_size;
+    } entries[TREE_CACHE_SIZE];
+    int count, next;
+};
+
+static HTREEITEM tree_next(HWND hwnd, UINT flag, HTREEITEM item)
 {
     DWORD_PTR next = 0;
 
@@ -39,7 +58,7 @@ HTREEITEM tree_next(HWND hwnd, UINT flag, HTREEITEM item)
 }
 
 /* The caret item of a tree view into *item, NULL if none; LIST_BUSY if it did not answer. */
-int tree_focus(HWND hwnd, HTREEITEM *item)
+static int tree_focus_item(HWND hwnd, HTREEITEM *item)
 {
     DWORD_PTR caret = 0;
 
@@ -56,7 +75,7 @@ int tree_focus(HWND hwnd, HTREEITEM *item)
  * blocks in the target, at least 16 bytes apart. Positive, as child ids
  * of items are elsewhere.
  */
-LONG tree_child_id(HTREEITEM item)
+static LONG tree_child_id(HTREEITEM item)
 {
     LONG id = (LONG)(((ULONG_PTR)item >> 4) & 0x7fffffff);
 
@@ -71,7 +90,7 @@ LONG tree_child_id(HTREEITEM item)
  * read. r is memory in the target. cache is NULL, or the cache of a walk
  * over the visible items that item is the next one of.
  */
-BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM item,
+static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM item,
                                       struct tree_cache *cache, struct bridge_object *obj,
                                       struct focus_strings *str)
 {
@@ -187,7 +206,7 @@ BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM item,
     return TRUE;
 }
 
-BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_object *obj,
+static BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_object *obj,
                                    struct focus_strings *str)
 {
     struct remote r;
@@ -199,3 +218,60 @@ BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_object *obj
     remote_close(&r);
     return ok;
 }
+
+/* Only the caret item can have focus; the child id just names it. */
+static int treeview_describe_focus(HWND hwnd, LONG id_child, struct bridge_object *obj,
+                                   struct focus_strings *str)
+{
+    HTREEITEM item;
+
+    if (tree_focus_item(hwnd, &item) == LIST_BUSY)
+        return LIST_BUSY;
+    if (!item)
+        return FALSE;
+    return describe_treeview_item(hwnd, item, obj, str) ? TRUE : LIST_BUSY;
+}
+
+static LONG treeview_focus(HWND hwnd)
+{
+    HTREEITEM item;
+
+    if (tree_focus_item(hwnd, &item) == LIST_BUSY)
+        return LIST_BUSY;
+    return item ? tree_child_id(item) : 0;
+}
+
+static void treeview_describe_self(HWND hwnd, struct bridge_object *obj,
+                                   struct focus_strings *str)
+{
+    obj->role = BRIDGE_ROLE_TREE;
+}
+
+/* The visible items from the first one down to the first out of view. */
+static void add_treeview_items(struct tree_build *b, HWND hwnd)
+{
+    struct bridge_object *obj;
+    struct tree_cache cache;
+    struct remote r;
+    HTREEITEM item;
+
+    /* One block of memory in the target for all items. */
+    if (!remote_open(hwnd, &r))
+        return;
+    memset(&cache, 0, sizeof(cache));
+    for (item = tree_next(hwnd, TVGN_FIRSTVISIBLE, NULL); item && (obj = tree_item_slot(b));
+         item = tree_next(hwnd, TVGN_NEXTVISIBLE, item))
+        if (!tree_item_done(b, describe_treeview_item_in(hwnd, &r, item, &cache, obj, b->str)))
+            break;
+    remote_close(&r);
+}
+
+const struct item_handler treeview_handler =
+{
+    treeview_describe_focus,
+    treeview_focus,
+    treeview_describe_self,
+    add_treeview_items,
+    FALSE,
+    TRUE,
+};

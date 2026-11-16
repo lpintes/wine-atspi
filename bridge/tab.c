@@ -17,7 +17,7 @@ struct tcitem32
  * The focused tab of a tab control, -1 if none; LIST_BUSY if it did not
  * answer. Without TCS_BUTTONS it is the selected tab as well.
  */
-int tab_focus(HWND hwnd)
+static int tab_focus_index(HWND hwnd)
 {
     DWORD_PTR item = (DWORD_PTR)-1;
 
@@ -33,8 +33,8 @@ int tab_focus(HWND hwnd)
  * The MSAA child id is item + 1, as on Windows. FALSE if the text could
  * not be read. r is memory in the target.
  */
-BOOL describe_tab_item_in(HWND hwnd, struct remote *r, int item, struct bridge_object *obj,
-                                 struct focus_strings *str)
+static BOOL describe_tab_item_in(HWND hwnd, struct remote *r, int item,
+                                 struct bridge_object *obj, struct focus_strings *str)
 {
     BYTE header[REMOTE_HEADER];
     WCHAR text[CELL_TEXT_MAX];
@@ -88,7 +88,7 @@ BOOL describe_tab_item_in(HWND hwnd, struct remote *r, int item, struct bridge_o
     return TRUE;
 }
 
-BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
+static BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
                               struct focus_strings *str)
 {
     struct remote r;
@@ -100,3 +100,59 @@ BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
     remote_close(&r);
     return ok;
 }
+
+static int tab_describe_focus(HWND hwnd, LONG id_child, struct bridge_object *obj,
+                              struct focus_strings *str)
+{
+    int item = id_child > 0 ? id_child - 1 : tab_focus_index(hwnd);
+
+    if (item == LIST_BUSY)
+        return LIST_BUSY;
+    if (item < 0)
+        return FALSE;
+    return describe_tab_item(hwnd, item, obj, str) ? TRUE : LIST_BUSY;
+}
+
+/* Arrow keys emit only EVENT_OBJECT_SELECTION, which is not hooked. */
+static LONG tab_focus(HWND hwnd)
+{
+    int item = tab_focus_index(hwnd);
+
+    return item == LIST_BUSY ? LIST_BUSY : item < 0 ? 0 : item + 1;
+}
+
+static void tab_describe_self(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
+{
+    DWORD_PTR count = 0;
+
+    obj->role = BRIDGE_ROLE_PAGE_TAB_LIST;
+    if (SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) &&
+        (LONG)count >= 0)
+        obj->set_size = (int)count;
+}
+
+static void add_tab_items(struct tree_build *b, HWND hwnd)
+{
+    struct bridge_object *obj;
+    DWORD_PTR count = 0;
+    struct remote r;
+    int i;
+
+    if (!remote_open(hwnd, &r))
+        return;
+    if (!SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+        count = 0;
+    for (i = 0; i < (int)count && (obj = tree_item_slot(b)); i++)
+        tree_item_done(b, describe_tab_item_in(hwnd, &r, i, obj, b->str));
+    remote_close(&r);
+}
+
+const struct item_handler tab_handler =
+{
+    tab_describe_focus,
+    tab_focus,
+    tab_describe_self,
+    add_tab_items,
+    FALSE,
+    TRUE,
+};

@@ -99,51 +99,6 @@ void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *obj,
 }
 
 /*
- * The list window as parent of its focused item, so that Orca presents
- * the list's label when focus enters it. No MSAA: Wine's oleacc names a
- * list only by its window text. A tree view is a tree; its items are its
- * children in the order they had focus, nesting is told by their level.
- */
-void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
-{
-    WCHAR cls[256];
-
-    get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
-    memset(obj, 0, sizeof(*obj));
-    if (!is_item_control(cls) && !is_toolbar(cls))
-        return;
-    obj->hwnd = (ULONG_PTR)hwnd;
-    obj->window_class = str->object_class;
-    /* A toolbar has no label; Wine's oleacc names it by its window text. */
-    if (is_toolbar(cls))
-        get_window_text(hwnd, str->container, sizeof(str->container));
-    else
-        find_label(hwnd, str->container, sizeof(str->container));
-    obj->name = str->container;
-    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
-                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
-                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
-                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
-                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
-    if (is_toolbar(cls))
-        obj->role = BRIDGE_ROLE_TOOL_BAR;
-    else if (is_tree_view(cls))
-        obj->role = BRIDGE_ROLE_TREE;
-    else if (is_tab_control(cls))
-    {
-        DWORD_PTR count = 0;
-
-        obj->role = BRIDGE_ROLE_PAGE_TAB_LIST;
-        if (SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) &&
-            (LONG)count >= 0)
-            obj->set_size = (int)count;
-    }
-    else
-        describe_list_box(hwnd, !is_list_box(cls), obj, str);
-    get_extents(hwnd, obj);
-}
-
-/*
  * Wine's winefile draws its tree and file panes as owner-drawn list boxes
  * without strings (programs/winefile/winefile.c, create_tree_window). The pane's
  * parent has class WFS_Tree, the process is winefile.exe (another program
@@ -193,7 +148,7 @@ static BOOL winefile_entry_name(HWND hwnd, int item, char *buf, int size)
  * filled, FALSE if the list has no such item, LIST_BUSY if it did not
  * answer.
  */
-int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
+static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
                                  struct focus_strings *str)
 {
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
@@ -247,3 +202,59 @@ int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
     obj->set_size = (int)count;
     return TRUE;
 }
+
+/*
+ * Wine reports focus_item + 1 even for an empty list (listbox.c,
+ * WM_SETFOCUS); then the list itself is described.
+ */
+static int listbox_describe_focus(HWND hwnd, LONG id_child, struct bridge_object *obj,
+                                  struct focus_strings *str)
+{
+    if (id_child <= 0)
+        return FALSE;
+    return describe_listbox_item(hwnd, id_child - 1, obj, str);
+}
+
+/*
+ * Wine's ListBox moves its caret on arrow keys without a focus event
+ * (listbox.c, LISTBOX_HandleKeyDown).
+ */
+static LONG listbox_focus(HWND hwnd)
+{
+    DWORD_PTR caret = LB_ERR;
+
+    if (!SendMessageTimeoutW(hwnd, LB_GETCARETINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &caret))
+        return LIST_BUSY;
+    return (LONG)caret < 0 ? 0 : (LONG)caret + 1;
+}
+
+static void listbox_describe_self(HWND hwnd, struct bridge_object *obj,
+                                  struct focus_strings *str)
+{
+    describe_list_box(hwnd, FALSE, obj, str);
+}
+
+/* Items from the top one down to the first out of view. */
+static void add_listbox_items(struct tree_build *b, HWND hwnd)
+{
+    DWORD_PTR top = 0, count = 0;
+    struct bridge_object *obj;
+    int i;
+
+    if (!SendMessageTimeoutW(hwnd, LB_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
+        !SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+        return;
+    for (i = (int)top; i < (int)count && (obj = tree_item_slot(b)); i++)
+        if (!tree_item_done(b, describe_listbox_item(hwnd, i, obj, b->str) == TRUE))
+            break;
+}
+
+const struct item_handler listbox_handler =
+{
+    listbox_describe_focus,
+    listbox_focus,
+    listbox_describe_self,
+    add_listbox_items,
+    FALSE,
+    TRUE,
+};

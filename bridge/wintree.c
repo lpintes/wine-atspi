@@ -21,16 +21,6 @@ enum tree_kind
     TREE_NODE,      /* the window and its children */
 };
 
-struct tree_build
-{
-    struct bridge_object *objects;
-    unsigned long long *parents;
-    int count;
-    struct focus_strings *str;
-    /* Also the items of lists, trees and tabs: three quarters of the time. */
-    BOOL items;
-};
-
 HWND tree_top;
 UINT_PTR tree_timer;
 /* Only the items of one control, see schedule_items. */
@@ -74,7 +64,7 @@ static BOOL describe_tree_window(HWND hwnd, const WCHAR *cls, struct bridge_obje
     memset(obj, 0, sizeof(*obj));
     if (!lstrcmpiW(cls, L"Static"))
         return describe_label(hwnd, str->object, sizeof(str->object), obj);
-    if (is_item_control(cls) || is_toolbar(cls))
+    if (find_item_handler(cls))
     {
         describe_container(hwnd, obj, str);
         return obj->hwnd != 0;
@@ -147,20 +137,33 @@ static void free_kept_strings(struct bridge_object *obj)
 }
 
 /*
- * Keeps the item just described into b->objects[b->count] if it lies in
- * the client area clip; FALSE if it does not.
+ * A cleared object to describe the next item of b->list into, with the
+ * strings in b->str; NULL if the tree is full.
  */
-static BOOL keep_tree_item(struct tree_build *b, HWND list, const int *clip)
+struct bridge_object *tree_item_slot(struct tree_build *b)
+{
+    if (b->count >= MAX_TREE)
+        return NULL;
+    memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
+    return &b->objects[b->count];
+}
+
+/*
+ * After the item in the slot was described, or not: keeps it if it was
+ * and lies in the client area of b->list. FALSE if it was not kept.
+ */
+BOOL tree_item_done(struct tree_build *b, BOOL described)
 {
     struct bridge_object *obj = &b->objects[b->count];
-    BOOL shown = obj->has_extents && obj->width > 0 && obj->height > 0 &&
+    const int *clip = b->clip;
+    BOOL shown = described && obj->has_extents && obj->width > 0 && obj->height > 0 &&
                  obj->x < clip[0] + clip[2] && obj->x + obj->width > clip[0] &&
                  obj->y < clip[1] + clip[3] && obj->y + obj->height > clip[1];
 
     if (shown)
     {
         keep_strings(obj);
-        b->parents[b->count++] = (ULONG_PTR)list;
+        b->parents[b->count++] = (ULONG_PTR)b->list;
     }
     free_strings(b->str);
     return shown;
@@ -171,108 +174,15 @@ static BOOL keep_tree_item(struct tree_build *b, HWND list, const int *clip)
  * control itself, so that flat review sees them. Only the items in view:
  * a list may hold thousands.
  */
-static void add_tree_items(struct tree_build *b, HWND hwnd, const WCHAR *cls)
+static void add_tree_items(struct tree_build *b, HWND hwnd, const struct item_handler *handler)
 {
-    DWORD_PTR top = 0, count = 0, page = 0;
-    struct listview_info info;
-    struct tree_cache cache;
-    struct remote r;
     RECT client;
-    int clip[4], i, end;
 
     if (!GetClientRect(hwnd, &client))
         return;
-    client_to_screen(hwnd, client, clip);
-    /* One block of memory in the target for all items. */
-    if (!is_list_box(cls) && !remote_open(hwnd, &r))
-        return;
-    if (is_toolbar(cls))
-    {
-        if (!SendMessageTimeoutW(hwnd, TB_BUTTONCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
-            count = 0;
-        for (i = 0; i < (int)count && b->count < MAX_TREE; i++)
-        {
-            int ok;
-
-            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
-            ok = describe_toolbar_button_in(hwnd, &r, i, &b->objects[b->count], b->str);
-            if (ok == TRUE)
-                keep_tree_item(b, hwnd, clip);
-            else
-                free_strings(b->str);
-            if (!ok)
-                break;
-        }
-    }
-    else if (is_tab_control(cls))
-    {
-        if (!SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
-            count = 0;
-        for (i = 0; i < (int)count && b->count < MAX_TREE; i++)
-        {
-            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
-            if (describe_tab_item_in(hwnd, &r, i, &b->objects[b->count], b->str))
-                keep_tree_item(b, hwnd, clip);
-            else
-                free_strings(b->str);
-        }
-    }
-    else if (is_tree_view(cls))
-    {
-        HTREEITEM item = tree_next(hwnd, TVGN_FIRSTVISIBLE, NULL);
-
-        memset(&cache, 0, sizeof(cache));
-        for (; item && b->count < MAX_TREE; item = tree_next(hwnd, TVGN_NEXTVISIBLE, item))
-        {
-            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
-            if (!describe_treeview_item_in(hwnd, &r, item, &cache, &b->objects[b->count],
-                                           b->str) ||
-                !keep_tree_item(b, hwnd, clip))
-            {
-                free_strings(b->str);
-                break;
-            }
-        }
-    }
-    else if (is_list_box(cls))
-    {
-        if (!SendMessageTimeoutW(hwnd, LB_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
-            !SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
-            return;
-        for (i = (int)top; i < (int)count && b->count < MAX_TREE; i++)
-        {
-            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
-            if (describe_listbox_item(hwnd, i, &b->objects[b->count], b->str) != TRUE ||
-                !keep_tree_item(b, hwnd, clip))
-            {
-                free_strings(b->str);
-                break;
-            }
-        }
-    }
-    else
-    {
-        /*
-         * In icon views the top index is 0 and a page holds every item, so
-         * each item is checked against the client area.
-         */
-        get_listview_info(hwnd, &r, &info);
-        if (!SendMessageTimeoutW(hwnd, LVM_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
-            !SendMessageTimeoutW(hwnd, LVM_GETCOUNTPERPAGE, 0, 0, SMTO_ABORTIFHUNG, 500, &page))
-            top = page = info.count = 0;
-        /* One more for a row cut at the bottom. */
-        end = (int)min(info.count, top + page + 1);
-        for (i = (int)top; i < end && b->count < MAX_TREE; i++)
-        {
-            memset(&b->objects[b->count], 0, sizeof(b->objects[0]));
-            if (describe_listview_item_in(hwnd, &r, &info, i, &b->objects[b->count], b->str))
-                keep_tree_item(b, hwnd, clip);
-            else
-                free_strings(b->str);
-        }
-    }
-    if (!is_list_box(cls))
-        remote_close(&r);
+    client_to_screen(hwnd, client, b->clip);
+    b->list = hwnd;
+    handler->add_items(b, hwnd);
 }
 
 static void add_tree_children(struct tree_build *b, HWND parent)
@@ -284,6 +194,7 @@ static void add_tree_children(struct tree_build *b, HWND parent)
          hwnd = GetWindow(hwnd, GW_HWNDNEXT))
     {
         struct bridge_object *obj = &b->objects[b->count];
+        const struct item_handler *handler;
         enum tree_kind kind;
 
         if (!IsWindowVisible(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
@@ -299,8 +210,8 @@ static void add_tree_children(struct tree_build *b, HWND parent)
         free_strings(b->str);
         b->parents[b->count++] = (ULONG_PTR)parent;
         /* A toolbar has both: its buttons and controls on it. */
-        if (b->items && (is_item_control(cls) || is_toolbar(cls)))
-            add_tree_items(b, hwnd, cls);
+        if (b->items && (handler = find_item_handler(cls)))
+            add_tree_items(b, hwnd, handler);
         if (kind == TREE_NODE)
             add_tree_children(b, hwnd);
     }
@@ -314,6 +225,7 @@ void report_tree(HWND top, HWND control, BOOL items)
 {
     HANDLE heap = GetProcessHeap();
     struct bridge_tree tree;
+    const struct item_handler *handler;
     struct tree_build b;
     DWORD start = GetTickCount(), pid = 0;
     WCHAR cls[256];
@@ -331,7 +243,8 @@ void report_tree(HWND top, HWND control, BOOL items)
         GetWindowThreadProcessId(top, &pid);
         if (!control)
             add_tree_children(&b, top);
-        else if (GetClassNameW(control, cls, ARRAYSIZE(cls)) && is_item_control(cls))
+        else if (GetClassNameW(control, cls, ARRAYSIZE(cls)) &&
+                 (handler = find_item_handler(cls)) && handler->keys_change_items)
         {
             /*
              * The control too: a key may select an item without moving
@@ -341,7 +254,7 @@ void report_tree(HWND top, HWND control, BOOL items)
                 atspi_post_update(pid, &b.objects[0]);
             free_strings(b.str);
             memset(&b.objects[0], 0, sizeof(b.objects[0]));
-            add_tree_items(&b, control, cls);
+            add_tree_items(&b, control, handler);
         }
         memset(&tree, 0, sizeof(tree));
         describe_frame(top, &tree.frame, b.str);

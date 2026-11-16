@@ -165,45 +165,27 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 }
 
 /*
- * Wine's ListBox moves its caret on arrow keys without a focus event
- * (listbox.c, LISTBOX_HandleKeyDown), and SysListView32 and SysTreeView32
- * emit no focus events at all; SysTabControl32 emits only a selection
- * event, which is not hooked; ToolbarWindow32 none (toolbar_focus). Reports the new item as focused and returns TRUE.
- * FALSE if hwnd is no list or the caret did not move, LIST_BUSY if the
- * list did not answer.
+ * No item control tells its focused item on a key: a ListBox moves its
+ * caret without a focus event, the others emit none at all or only
+ * events that are not hooked (see the focus member of each item_handler).
+ * Reports the new item as focused and returns TRUE. FALSE if hwnd is no
+ * item control or the focus did not move, LIST_BUSY if it did not answer.
  */
 static int check_list_caret(HWND hwnd)
 {
+    const struct item_handler *handler;
     WCHAR cls[256];
-    DWORD_PTR caret = LB_ERR;
+    LONG child;
 
-    if (last_focus.id_object != OBJID_CLIENT || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)))
+    if (last_focus.id_object != OBJID_CLIENT || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) ||
+        !(handler = find_item_handler(cls)))
         return FALSE;
-    if (is_tree_view(cls))
-    {
-        HTREEITEM item;
-
-        if (tree_focus(hwnd, &item) == LIST_BUSY)
-            return LIST_BUSY;
-        if (!item || tree_child_id(item) == last_focus.id_child)
-            return FALSE;
-        on_focus(hwnd, OBJID_CLIENT, tree_child_id(item));
-        return TRUE;
-    }
-    if (!lstrcmpiW(cls, L"SysListView32") || is_tab_control(cls) || is_toolbar(cls))
-    {
-        caret = is_tab_control(cls) ? tab_focus(hwnd) :
-                is_toolbar(cls) ? toolbar_focus(hwnd) : listview_focus(hwnd);
-        if ((LONG)caret == LIST_BUSY)
-            return LIST_BUSY;
-    }
-    else if (!is_list_box(cls))
-        return FALSE;
-    else if (!SendMessageTimeoutW(hwnd, LB_GETCARETINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &caret))
+    child = handler->focus(hwnd);
+    if (child == LIST_BUSY)
         return LIST_BUSY;
-    if ((LONG)caret < 0 || (LONG)caret + 1 == last_focus.id_child)
+    if (child <= 0 || child == last_focus.id_child)
         return FALSE;
-    on_focus(hwnd, OBJID_CLIENT, (LONG)caret + 1);
+    on_focus(hwnd, OBJID_CLIENT, child);
     return TRUE;
 }
 
@@ -296,6 +278,7 @@ int key_retries;
 
 void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
 {
+    const struct item_handler *handler;
     struct bridge_object obj;
     struct focus_strings str;
     GUITHREADINFO gti;
@@ -333,7 +316,8 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
      * A key may scroll a list or expand a tree item, which tells no event:
      * its items in the window tree are read again.
      */
-    if (list != LIST_BUSY && GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) && is_item_control(cls))
+    if (list != LIST_BUSY && GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) &&
+        (handler = find_item_handler(cls)) && handler->keys_change_items)
         schedule_items(hwnd);
     if (list)
     {

@@ -230,26 +230,24 @@ int bridge_click(unsigned long long handle)
     return PostMessageW(hwnd, BM_CLICK, 0, 0);
 }
 
-BOOL is_list_box(const WCHAR *cls)
+/* The handler of a control whose items the bridge reads, NULL for other classes. */
+const struct item_handler *find_item_handler(const WCHAR *cls)
 {
-    return !lstrcmpiW(cls, L"ListBox") || !lstrcmpiW(cls, L"ComboLBox");
-}
+    static const struct { const WCHAR *cls; const struct item_handler *handler; } map[] =
+    {
+        { L"ComboLBox", &listbox_handler },
+        { L"ListBox", &listbox_handler },
+        { L"SysListView32", &listview_handler },
+        { L"SysTabControl32", &tab_handler },
+        { L"SysTreeView32", &treeview_handler },
+        { L"ToolbarWindow32", &toolbar_handler },
+    };
+    unsigned int i;
 
-BOOL is_tree_view(const WCHAR *cls)
-{
-    return !lstrcmpiW(cls, L"SysTreeView32");
-}
-
-BOOL is_tab_control(const WCHAR *cls)
-{
-    return !lstrcmpiW(cls, L"SysTabControl32");
-}
-
-/* A control whose items the bridge reads with messages: a list, list view, tree view or tab control. */
-BOOL is_item_control(const WCHAR *cls)
-{
-    return is_list_box(cls) || !lstrcmpiW(cls, L"SysListView32") || is_tree_view(cls) ||
-           is_tab_control(cls);
+    for (i = 0; i < ARRAYSIZE(map); i++)
+        if (!lstrcmpiW(cls, map[i].cls))
+            return map[i].handler;
+    return NULL;
 }
 
 /*
@@ -259,12 +257,12 @@ BOOL is_item_control(const WCHAR *cls)
 BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
                             struct bridge_object *obj, struct focus_strings *str)
 {
+    const struct item_handler *handler = NULL;
     IAccessible *acc = NULL;
     VARIANT child, role, state;
     BSTR name = NULL;
     LONG msaa_state = 0;
     WCHAR cls[256];
-    BOOL listview, listbox;
     HWND updown;
 
     get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
@@ -277,51 +275,9 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     obj->has_extents = FALSE;
     if (id_object == OBJID_CLIENT && !lstrcmpW(cls, CONSOLE_CLASS))
         return describe_console(hwnd, obj, str);
-    if (id_object == OBJID_CLIENT && is_tree_view(cls))
+    if (id_object == OBJID_CLIENT && (handler = find_item_handler(cls)))
     {
-        /* Only the caret item can have focus; the child id just names it. */
-        HTREEITEM item;
-
-        if (tree_focus(hwnd, &item) == LIST_BUSY)
-            return FALSE;
-        if (item)
-            return describe_treeview_item(hwnd, item, obj, str);
-    }
-    if (id_object == OBJID_CLIENT && is_tab_control(cls))
-    {
-        int item = id_child > 0 ? id_child - 1 : tab_focus(hwnd);
-
-        if (item == LIST_BUSY)
-            return FALSE;
-        if (item >= 0)
-            return describe_tab_item(hwnd, item, obj, str);
-    }
-    if (id_object == OBJID_CLIENT && is_toolbar(cls))
-    {
-        /* The focus of a toolbar is its hot button, see toolbar_focus. */
-        int item = id_child > 0 ? id_child - 1 : toolbar_focus(hwnd);
-
-        if (item == LIST_BUSY)
-            return FALSE;
-        if (item >= 0 && describe_toolbar_button(hwnd, item, obj, str) == TRUE)
-            return TRUE;
-    }
-    listview = id_object == OBJID_CLIENT && !lstrcmpiW(cls, L"SysListView32");
-    if (listview)
-    {
-        int item = id_child > 0 ? id_child - 1 : listview_focus(hwnd);
-
-        if (item >= 0)
-            return describe_listview_item(hwnd, item, obj, str);
-    }
-    listbox = id_object == OBJID_CLIENT && is_list_box(cls);
-    if (listbox && id_child > 0)
-    {
-        /*
-         * Wine reports focus_item + 1 even for an empty list
-         * (listbox.c, WM_SETFOCUS); then the list itself is described.
-         */
-        int ret = describe_listbox_item(hwnd, id_child - 1, obj, str);
+        int ret = handler->describe_focus(hwnd, id_child, obj, str);
 
         if (ret == LIST_BUSY)
             return FALSE;
@@ -395,8 +351,8 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     }
     if (!str->object[0] && !obj->child && needs_label(obj->role))
         find_label(hwnd, str->object, sizeof(str->object));
-    if ((listview || listbox) && !obj->child)
-        describe_list_box(hwnd, listview, obj, str);
+    if (handler && !obj->child)
+        handler->describe_self(hwnd, obj, str);
     if (!obj->child)
         get_extents(hwnd, obj);
 
@@ -406,6 +362,38 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
     VariantClear(&child);
     IAccessible_Release(acc);
     return TRUE;
+}
+
+/*
+ * The control as parent of its focused item, so that Orca presents the
+ * control's label when focus enters it. No MSAA: Wine's oleacc names a
+ * list only by its window text. A tree view is a tree; its items are its
+ * children in the order they had focus, nesting is told by their level.
+ * obj stays cleared for a window without an item handler.
+ */
+void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str)
+{
+    const struct item_handler *handler;
+    WCHAR cls[256];
+
+    get_class(hwnd, cls, ARRAYSIZE(cls), str->object_class, sizeof(str->object_class));
+    memset(obj, 0, sizeof(*obj));
+    if (!(handler = find_item_handler(cls)))
+        return;
+    obj->hwnd = (ULONG_PTR)hwnd;
+    obj->window_class = str->object_class;
+    if (handler->named_by_text)
+        get_window_text(hwnd, str->container, sizeof(str->container));
+    else
+        find_label(hwnd, str->container, sizeof(str->container));
+    obj->name = str->container;
+    obj->states = BRIDGE_STATE_BIT(BRIDGE_STATE_ENABLED) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
+                  BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
+    handler->describe_self(hwnd, obj, str);
+    get_extents(hwnd, obj);
 }
 
 void describe_frame(HWND hwnd, struct bridge_object *obj,

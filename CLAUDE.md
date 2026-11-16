@@ -54,8 +54,12 @@ the same way NVDA does.
 - **Source layout:** the Win32 core is split by area into `bridge/*.c`
   (one file per control family, plus `object.c`, `wintree.c`,
   `events.c`, `menu.c`, `keys.c`, `main.c`); what they share is in
-  `bridge/core.h`, whose top comment lists the files. The AT-SPI side
-  is `bridge/atspi.c`, the interface between the two `bridge/bridge.h`.
+  `bridge/core.h`, whose top comment lists the files. A control with
+  items (list box, list view, tree view, tab control, toolbar) has a
+  `struct item_handler` in its file, found by class with
+  `find_item_handler` (`object.c`); focus, key check and window tree go
+  through it. The AT-SPI side is `bridge/atspi.c`, the interface
+  between the two `bridge/bridge.h`.
 - **One AT-SPI application per Wine process**, each with its own D-Bus
   connection. Orca keeps per-application settings and scripts and announces
   application switches, so lumping all Wine programs into one application

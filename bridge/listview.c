@@ -26,6 +26,24 @@ struct lvcolumn32
     int cchTextMax;
 };
 
+/*
+ * What all items of a list view share. The window tree describes many
+ * rows of one list, and each message to the target is a round trip.
+ */
+struct listview_info
+{
+    int columns;            /* from listview_columns */
+    int order[MAX_COLUMNS];
+    DWORD_PTR count;        /* items */
+    /*
+     * Cell x and width of each column from the first row described: in
+     * report view all rows have the same columns, so a later row asks
+     * only for its own top and height.
+     */
+    BOOL have_cells;
+    int cells[4 * MAX_COLUMNS];
+};
+
 /* Text of item's subitem (0 for the item itself) of a list view. */
 static BOOL get_listview_text(HWND hwnd, struct remote *r, int item, int subitem, WCHAR *buf)
 {
@@ -110,7 +128,8 @@ int listview_columns(HWND hwnd, struct remote *r, int *order)
     return (int)count;
 }
 
-int listview_focus(HWND hwnd)
+/* Index of the focused item, -1 if none; LIST_BUSY if the list did not answer. */
+static int listview_focus_index(HWND hwnd)
 {
     DWORD_PTR item = (DWORD_PTR)-1;
 
@@ -120,7 +139,7 @@ int listview_focus(HWND hwnd)
     return (int)item;
 }
 
-void get_listview_info(HWND hwnd, struct remote *r, struct listview_info *info)
+static void get_listview_info(HWND hwnd, struct remote *r, struct listview_info *info)
 {
     info->columns = listview_columns(hwnd, r, info->order);
     info->count = 0;
@@ -173,7 +192,7 @@ static void get_listview_cells(HWND hwnd, struct remote *r, struct listview_info
  * be read. r is memory in the target, info comes from get_listview_info;
  * the tree passes them for all items of a list.
  */
-BOOL describe_listview_item_in(HWND hwnd, struct remote *r, struct listview_info *info,
+static BOOL describe_listview_item_in(HWND hwnd, struct remote *r, struct listview_info *info,
                                       int item, struct bridge_object *obj,
                                       struct focus_strings *str)
 {
@@ -243,7 +262,7 @@ BOOL describe_listview_item_in(HWND hwnd, struct remote *r, struct listview_info
     return TRUE;
 }
 
-BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *obj,
+static BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *obj,
                                    struct focus_strings *str)
 {
     struct listview_info info;
@@ -257,3 +276,65 @@ BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *obj,
     remote_close(&r);
     return ok;
 }
+
+static int listview_describe_focus(HWND hwnd, LONG id_child, struct bridge_object *obj,
+                                   struct focus_strings *str)
+{
+    int item = id_child > 0 ? id_child - 1 : listview_focus_index(hwnd);
+
+    if (item == LIST_BUSY)
+        return LIST_BUSY;
+    if (item < 0)
+        return FALSE;
+    return describe_listview_item(hwnd, item, obj, str) ? TRUE : LIST_BUSY;
+}
+
+/* SysListView32 emits no focus events for its items. */
+static LONG listview_focus(HWND hwnd)
+{
+    int item = listview_focus_index(hwnd);
+
+    return item == LIST_BUSY ? LIST_BUSY : item < 0 ? 0 : item + 1;
+}
+
+static void listview_describe_self(HWND hwnd, struct bridge_object *obj,
+                                   struct focus_strings *str)
+{
+    describe_list_box(hwnd, TRUE, obj, str);
+}
+
+static void add_listview_items(struct tree_build *b, HWND hwnd)
+{
+    DWORD_PTR top = 0, page = 0;
+    struct listview_info info;
+    struct bridge_object *obj;
+    struct remote r;
+    int i, end;
+
+    /* One block of memory in the target for all items. */
+    if (!remote_open(hwnd, &r))
+        return;
+    /*
+     * In icon views the top index is 0 and a page holds every item, so
+     * each item is checked against the client area.
+     */
+    get_listview_info(hwnd, &r, &info);
+    if (!SendMessageTimeoutW(hwnd, LVM_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
+        !SendMessageTimeoutW(hwnd, LVM_GETCOUNTPERPAGE, 0, 0, SMTO_ABORTIFHUNG, 500, &page))
+        top = page = info.count = 0;
+    /* One more for a row cut at the bottom. */
+    end = (int)min(info.count, top + page + 1);
+    for (i = (int)top; i < end && (obj = tree_item_slot(b)); i++)
+        tree_item_done(b, describe_listview_item_in(hwnd, &r, &info, i, obj, b->str));
+    remote_close(&r);
+}
+
+const struct item_handler listview_handler =
+{
+    listview_describe_focus,
+    listview_focus,
+    listview_describe_self,
+    add_listview_items,
+    FALSE,
+    TRUE,
+};

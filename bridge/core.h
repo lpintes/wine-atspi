@@ -85,41 +85,45 @@ struct remote
  */
 #define LIST_BUSY (-2)
 
-/*
- * What all items of a list view share. The window tree describes many
- * rows of one list, and each message to the target is a round trip.
- */
-struct listview_info
+/* The window tree being built, see wintree.c. */
+struct tree_build
 {
-    int columns;            /* from listview_columns */
-    int order[MAX_COLUMNS];
-    DWORD_PTR count;        /* items */
-    /*
-     * Cell x and width of each column from the first row described: in
-     * report view all rows have the same columns, so a later row asks
-     * only for its own top and height.
-     */
-    BOOL have_cells;
-    int cells[4 * MAX_COLUMNS];
+    struct bridge_object *objects;
+    unsigned long long *parents;
+    int count;
+    struct focus_strings *str;
+    /* Also the items of lists, trees and tabs: three quarters of the time. */
+    BOOL items;
+    /* The control whose items are added, and its client area on the screen. */
+    HWND list;
+    int clip[4];
 };
 
 /*
- * Level and siblings of the parents met in a walk over the visible items
- * of a tree (TVGN_FIRSTVISIBLE, then TVGN_NEXTVISIBLE). Visible items come
- * in tree order, so the next item with the same parent is the next
- * sibling: its place follows without walking all siblings again, which
- * costs one round trip each.
+ * Handler of a control whose items the bridge reads with messages: list
+ * box, list view, tree view, tab control, toolbar. Wine's oleacc has no
+ * proxy for any of them, and they emit few or no WinEvents for their
+ * items. find_item_handler picks it by window class.
  */
-#define TREE_CACHE_SIZE 8
-
-struct tree_cache
+struct item_handler
 {
-    struct
-    {
-        HTREEITEM parent;
-        int level, position, set_size;
-    } entries[TREE_CACHE_SIZE];
-    int count, next;
+    /*
+     * Describes the item that a focus event on the control with id_child
+     * stands for. TRUE if described, FALSE to describe the control itself
+     * instead, LIST_BUSY if the control did not answer.
+     */
+    int (*describe_focus)(HWND hwnd, LONG id_child, struct bridge_object *obj,
+                          struct focus_strings *str);
+    /* Child id (> 0) of the focused item, 0 if none, LIST_BUSY. */
+    LONG (*focus)(HWND hwnd);
+    /* Role, states and counts of the control itself. */
+    void (*describe_self)(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
+    /* Adds the items in view to b, see tree_item_slot. */
+    void (*add_items)(struct tree_build *b, HWND hwnd);
+    /* Named by its window text instead of a label. */
+    BOOL named_by_text;
+    /* A key may scroll it or expand an item, see schedule_items. */
+    BOOL keys_change_items;
 };
 
 /* A range out of the client area lies this far above or below the window. */
@@ -200,12 +204,10 @@ unsigned int role_from_class(HWND hwnd, const WCHAR *cls);
 void get_extents(HWND hwnd, struct bridge_object *obj);
 void client_to_screen(HWND hwnd, RECT rect, int *out);
 void set_item_extents(HWND hwnd, RECT rect, struct bridge_object *obj);
-BOOL is_list_box(const WCHAR *cls);
-BOOL is_tree_view(const WCHAR *cls);
-BOOL is_tab_control(const WCHAR *cls);
-BOOL is_item_control(const WCHAR *cls);
+const struct item_handler *find_item_handler(const WCHAR *cls);
 BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
                      struct bridge_object *obj, struct focus_strings *str);
+void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
 void describe_frame(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
 
 /* range.c */
@@ -225,47 +227,23 @@ BOOL describe_label(HWND hwnd, char *dst, int size, struct bridge_object *obj);
 void describe_labels(HWND top, struct bridge_focus *focus, struct focus_strings *str);
 
 /* listview.c */
+extern const struct item_handler listview_handler;
 BOOL get_listview_header(HWND hwnd, struct remote *r, int column, WCHAR *buf);
 int listview_columns(HWND hwnd, struct remote *r, int *order);
-int listview_focus(HWND hwnd);
-void get_listview_info(HWND hwnd, struct remote *r, struct listview_info *info);
-BOOL describe_listview_item_in(HWND hwnd, struct remote *r, struct listview_info *info,
-                               int item, struct bridge_object *obj,
-                               struct focus_strings *str);
-BOOL describe_listview_item(HWND hwnd, int item, struct bridge_object *obj,
-                            struct focus_strings *str);
 
 /* tab.c */
-int tab_focus(HWND hwnd);
-BOOL describe_tab_item_in(HWND hwnd, struct remote *r, int item, struct bridge_object *obj,
-                          struct focus_strings *str);
-BOOL describe_tab_item(HWND hwnd, int item, struct bridge_object *obj,
-                       struct focus_strings *str);
+extern const struct item_handler tab_handler;
 
 /* toolbar.c */
-BOOL is_toolbar(const WCHAR *cls);
-int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
-                               struct bridge_object *obj, struct focus_strings *str);
-int describe_toolbar_button(HWND hwnd, int index, struct bridge_object *obj,
-                            struct focus_strings *str);
-int toolbar_focus(HWND hwnd);
+extern const struct item_handler toolbar_handler;
 
 /* listbox.c */
+extern const struct item_handler listbox_handler;
 void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *obj,
                        struct focus_strings *str);
-void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
-int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
-                          struct focus_strings *str);
 
 /* treeview.c */
-HTREEITEM tree_next(HWND hwnd, UINT flag, HTREEITEM item);
-int tree_focus(HWND hwnd, HTREEITEM *item);
-LONG tree_child_id(HTREEITEM item);
-BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM item,
-                               struct tree_cache *cache, struct bridge_object *obj,
-                               struct focus_strings *str);
-BOOL describe_treeview_item(HWND hwnd, HTREEITEM item, struct bridge_object *obj,
-                            struct focus_strings *str);
+extern const struct item_handler treeview_handler;
 
 /* console.c */
 extern struct console_client_state console_client;
@@ -281,6 +259,8 @@ void report_status_bar(HWND top);
 /* wintree.c */
 extern HWND tree_top;
 extern UINT_PTR tree_timer;
+struct bridge_object *tree_item_slot(struct tree_build *b);
+BOOL tree_item_done(struct tree_build *b, BOOL described);
 void report_tree(HWND top, HWND control, BOOL items);
 void CALLBACK refresh_tree(HWND unused, UINT msg, UINT_PTR id, DWORD time);
 void schedule_tree(HWND hwnd);

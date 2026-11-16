@@ -4,11 +4,6 @@
  */
 #include "core.h"
 
-BOOL is_toolbar(const WCHAR *cls)
-{
-    return !lstrcmpiW(cls, L"ToolbarWindow32");
-}
-
 /* TBBUTTONINFOW of a 32-bit target. */
 struct tbbuttoninfo32
 {
@@ -59,7 +54,7 @@ static void get_toolbar_tooltip(HWND hwnd, struct remote *r, int command, WCHAR 
  * is index + 1, as on Windows. TRUE if described, FALSE if the toolbar
  * did not answer, -1 for a separator or hidden button.
  */
-int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
+static int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
                                       struct bridge_object *obj, struct focus_strings *str)
 {
     BYTE header[REMOTE_HEADER];
@@ -143,7 +138,7 @@ int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
     return TRUE;
 }
 
-int describe_toolbar_button(HWND hwnd, int index, struct bridge_object *obj,
+static int describe_toolbar_button(HWND hwnd, int index, struct bridge_object *obj,
                                    struct focus_strings *str)
 {
     struct remote r;
@@ -163,7 +158,7 @@ int describe_toolbar_button(HWND hwnd, int index, struct bridge_object *obj,
  * TB_GETHOTITEM answers -1 unless the toolbar is flat or themed. -1 if
  * none, LIST_BUSY if the toolbar did not answer.
  */
-int toolbar_focus(HWND hwnd)
+static int toolbar_focus_index(HWND hwnd)
 {
     DWORD_PTR item = (DWORD_PTR)-1;
 
@@ -171,3 +166,65 @@ int toolbar_focus(HWND hwnd)
         return LIST_BUSY;
     return (int)item;
 }
+
+/*
+ * The focus of a toolbar is its hot button, see toolbar_focus_index. A
+ * separator or a button that could not be read leaves the toolbar itself.
+ */
+static int toolbar_describe_focus(HWND hwnd, LONG id_child, struct bridge_object *obj,
+                                  struct focus_strings *str)
+{
+    int item = id_child > 0 ? id_child - 1 : toolbar_focus_index(hwnd);
+
+    if (item == LIST_BUSY)
+        return LIST_BUSY;
+    return item >= 0 && describe_toolbar_button(hwnd, item, obj, str) == TRUE;
+}
+
+static LONG toolbar_focus(HWND hwnd)
+{
+    int item = toolbar_focus_index(hwnd);
+
+    return item == LIST_BUSY ? LIST_BUSY : item < 0 ? 0 : item + 1;
+}
+
+static void toolbar_describe_self(HWND hwnd, struct bridge_object *obj,
+                                  struct focus_strings *str)
+{
+    obj->role = BRIDGE_ROLE_TOOL_BAR;
+}
+
+static void add_toolbar_items(struct tree_build *b, HWND hwnd)
+{
+    struct bridge_object *obj;
+    DWORD_PTR count = 0;
+    struct remote r;
+    int i, ok;
+
+    if (!remote_open(hwnd, &r))
+        return;
+    if (!SendMessageTimeoutW(hwnd, TB_BUTTONCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+        count = 0;
+    for (i = 0; i < (int)count && (obj = tree_item_slot(b)); i++)
+    {
+        ok = describe_toolbar_button_in(hwnd, &r, i, obj, b->str);
+        tree_item_done(b, ok == TRUE);
+        if (!ok)
+            break;
+    }
+    remote_close(&r);
+}
+
+/*
+ * A toolbar has no label; Wine's oleacc names it by its window text. Its
+ * keys only move the hot button.
+ */
+const struct item_handler toolbar_handler =
+{
+    toolbar_describe_focus,
+    toolbar_focus,
+    toolbar_describe_self,
+    add_toolbar_items,
+    TRUE,
+    FALSE,
+};
