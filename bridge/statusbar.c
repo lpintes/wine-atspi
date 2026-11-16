@@ -59,18 +59,15 @@ static BOOL read_status_bar(HWND hwnd, WCHAR *text, int size)
     int i;
 
     text[0] = 0;
-    if (!SendMessageTimeoutW(hwnd, SB_GETPARTS, 0, 0, SMTO_ABORTIFHUNG, STATUS_TIMEOUT_MS,
-                             &parts))
+    if (!send_message(hwnd, SB_GETPARTS, 0, 0, STATUS_TIMEOUT_MS, &parts))
         return FALSE;
-    if (SendMessageTimeoutW(hwnd, SB_ISSIMPLE, 0, 0, SMTO_ABORTIFHUNG, STATUS_TIMEOUT_MS,
-                            &simple) && simple)
+    if (send_message(hwnd, SB_ISSIMPLE, 0, 0, STATUS_TIMEOUT_MS, &simple) && simple)
         parts = 1;
     if (!remote_open(hwnd, &r))
         return FALSE;
     for (i = 0; ok && i < (int)parts && i < 256; i++)
     {
-        if (!SendMessageTimeoutW(hwnd, SB_GETTEXTLENGTHW, i, 0, SMTO_ABORTIFHUNG,
-                                 STATUS_TIMEOUT_MS, &len))
+        if (!send_message(hwnd, SB_GETTEXTLENGTHW, i, 0, STATUS_TIMEOUT_MS, &len))
         {
             ok = FALSE;
             break;
@@ -79,8 +76,7 @@ static BOOL read_status_bar(HWND hwnd, WCHAR *text, int size)
         if (!LOWORD(len) || (HIWORD(len) & SBT_OWNERDRAW) || LOWORD(len) >= CELL_TEXT_MAX)
             continue;
         ok = WriteProcessMemory(r.process, r.base, &empty, sizeof(empty), &done) &&
-             SendMessageTimeoutW(hwnd, SB_GETTEXTW, i, (LPARAM)r.base, SMTO_ABORTIFHUNG,
-                                 STATUS_TIMEOUT_MS, &len) &&
+             send_message(hwnd, SB_GETTEXTW, i, (LPARAM)r.base, STATUS_TIMEOUT_MS, &len) &&
              ReadProcessMemory(r.process, r.base, buf, sizeof(buf), &done);
         if (!ok)
             break;

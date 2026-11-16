@@ -56,6 +56,55 @@ void to_utf8(const WCHAR *src, char *dst, int size)
     dst[size - 1] = 0;
 }
 
+/*
+ * A thread that let a message time out is not asked again for this long,
+ * so one pass over a busy target waits once instead of once per message.
+ * Shorter than KEY_CHECK_DELAY_MS, so the key check's retry asks again.
+ */
+#define BUSY_HOLD_MS 40
+
+static DWORD busy_thread, busy_until;
+
+static BOOL thread_held(DWORD thread)
+{
+    return thread && thread == busy_thread && (LONG)(GetTickCount() - busy_until) < 0;
+}
+
+/* TRUE if the thread of hwnd let a message time out just now. */
+BOOL is_busy(HWND hwnd)
+{
+    return thread_held(GetWindowThreadProcessId(hwnd, NULL));
+}
+
+/*
+ * SendMessageTimeoutW with SMTO_ABORTIFHUNG. Fails at once with
+ * ERROR_TIMEOUT while the window's thread is held busy; result may be NULL.
+ */
+BOOL send_message(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT timeout,
+                  DWORD_PTR *result)
+{
+    DWORD thread = GetWindowThreadProcessId(hwnd, NULL);
+    DWORD_PTR ignored;
+
+    if (thread_held(thread))
+    {
+        SetLastError(ERROR_TIMEOUT);
+        return FALSE;
+    }
+    if (SendMessageTimeoutW(hwnd, msg, wparam, lparam, SMTO_ABORTIFHUNG, timeout,
+                            result ? result : &ignored))
+        return TRUE;
+    /* Wine gives ERROR_TIMEOUT for a timeout and for a hung thread. */
+    if (thread && GetLastError() == ERROR_TIMEOUT)
+    {
+        trace(L"thread %lx busy (message %x to %p)", thread, msg, hwnd);
+        busy_thread = thread;
+        busy_until = GetTickCount() + BUSY_HOLD_MS;
+        SetLastError(ERROR_TIMEOUT);
+    }
+    return FALSE;
+}
+
 /* GetWindowText does not ask windows of other processes, WM_GETTEXT does. */
 void get_window_text(HWND hwnd, char *dst, int size)
 {
@@ -63,8 +112,8 @@ void get_window_text(HWND hwnd, char *dst, int size)
     DWORD_PTR res;
 
     buf[0] = 0;
-    if (!SendMessageTimeoutW(hwnd, WM_GETTEXT, ARRAYSIZE(buf), (LPARAM)buf,
-                             SMTO_ABORTIFHUNG, 500, &res))
+    if (!send_message(hwnd, WM_GETTEXT, ARRAYSIZE(buf), (LPARAM)buf,
+                      SEND_TIMEOUT_MS, &res))
         buf[0] = 0;
     buf[ARRAYSIZE(buf) - 1] = 0;
     to_utf8(buf, dst, size);
@@ -170,7 +219,7 @@ BOOL remote_text(HWND hwnd, struct remote *r, UINT msg, WPARAM wparam,
     memcpy(block, header, REMOTE_HEADER);
     memset(block + REMOTE_HEADER, 0, sizeof(WCHAR));
     if (!WriteProcessMemory(r->process, r->base, block, sizeof(block), &done) ||
-        !SendMessageTimeoutW(hwnd, msg, wparam, (LPARAM)r->base, SMTO_ABORTIFHUNG, 500, &ret) ||
+        !send_message(hwnd, msg, wparam, (LPARAM)r->base, SEND_TIMEOUT_MS, &ret) ||
         !ReadProcessMemory(r->process, r->base + REMOTE_HEADER, buf,
                            CELL_TEXT_MAX * sizeof(WCHAR), &done))
         return FALSE;
@@ -189,6 +238,6 @@ BOOL remote_rect(HWND hwnd, struct remote *r, UINT msg, WPARAM wparam, RECT *rec
     SIZE_T done;
 
     return WriteProcessMemory(r->process, r->base, rect, sizeof(*rect), &done) &&
-           SendMessageTimeoutW(hwnd, msg, wparam, (LPARAM)r->base, SMTO_ABORTIFHUNG, 500, &ret) &&
+           send_message(hwnd, msg, wparam, (LPARAM)r->base, SEND_TIMEOUT_MS, &ret) &&
            ret && ReadProcessMemory(r->process, r->base, rect, sizeof(*rect), &done);
 }

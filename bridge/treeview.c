@@ -51,8 +51,8 @@ static HTREEITEM tree_next(HWND hwnd, UINT flag, HTREEITEM item)
 {
     DWORD_PTR next = 0;
 
-    if (!SendMessageTimeoutW(hwnd, TVM_GETNEXTITEM, flag, (LPARAM)item,
-                             SMTO_ABORTIFHUNG, 500, &next))
+    if (!send_message(hwnd, TVM_GETNEXTITEM, flag, (LPARAM)item,
+                      SEND_TIMEOUT_MS, &next))
         return NULL;
     return (HTREEITEM)next;
 }
@@ -63,8 +63,8 @@ static int tree_focus_item(HWND hwnd, HTREEITEM *item)
     DWORD_PTR caret = 0;
 
     *item = NULL;
-    if (!SendMessageTimeoutW(hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0,
-                             SMTO_ABORTIFHUNG, 500, &caret))
+    if (!send_message(hwnd, TVM_GETNEXTITEM, TVGN_CARET, 0,
+                      SEND_TIMEOUT_MS, &caret))
         return LIST_BUSY;
     *item = (HTREEITEM)caret;
     return TRUE;

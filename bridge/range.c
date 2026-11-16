@@ -25,8 +25,8 @@ static BOOL updown_range(HWND hwnd, DWORD_PTR *low, DWORD_PTR *high)
     base = VirtualAllocEx(process, NULL, sizeof(range), MEM_COMMIT, PAGE_READWRITE);
     ok = base &&
          WriteProcessMemory(process, base, range, sizeof(range), &done) &&
-         SendMessageTimeoutW(hwnd, UDM_GETRANGE32, (WPARAM)base, (LPARAM)(base + sizeof(INT)),
-                             SMTO_ABORTIFHUNG, 500, NULL) &&
+         send_message(hwnd, UDM_GETRANGE32, (WPARAM)base, (LPARAM)(base + sizeof(INT)),
+                      SEND_TIMEOUT_MS, NULL) &&
          ReadProcessMemory(process, base, range, sizeof(range), &done);
     if (base)
         VirtualFreeEx(process, base, 0, MEM_RELEASE);
@@ -54,7 +54,7 @@ HWND find_updown(HWND hwnd)
     {
         if (!GetClassNameW(sibling, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"msctls_updown32"))
             continue;
-        if (SendMessageTimeoutW(sibling, UDM_GETBUDDY, 0, 0, SMTO_ABORTIFHUNG, 500, &buddy) &&
+        if (send_message(sibling, UDM_GETBUDDY, 0, 0, SEND_TIMEOUT_MS, &buddy) &&
             (HWND)buddy == hwnd)
             return sibling;
     }
@@ -74,25 +74,25 @@ void describe_range(HWND hwnd, const WCHAR *cls, struct bridge_object *obj)
 
     if (!lstrcmpiW(cls, L"msctls_trackbar32"))
     {
-        if (!SendMessageTimeoutW(hwnd, TBM_GETPOS, 0, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
-            !SendMessageTimeoutW(hwnd, TBM_GETRANGEMIN, 0, 0, SMTO_ABORTIFHUNG, 500, &low) ||
-            !SendMessageTimeoutW(hwnd, TBM_GETRANGEMAX, 0, 0, SMTO_ABORTIFHUNG, 500, &high))
+        if (!send_message(hwnd, TBM_GETPOS, 0, 0, SEND_TIMEOUT_MS, &pos) ||
+            !send_message(hwnd, TBM_GETRANGEMIN, 0, 0, SEND_TIMEOUT_MS, &low) ||
+            !send_message(hwnd, TBM_GETRANGEMAX, 0, 0, SEND_TIMEOUT_MS, &high))
             return;
-        SendMessageTimeoutW(hwnd, TBM_GETLINESIZE, 0, 0, SMTO_ABORTIFHUNG, 500, &step);
+        send_message(hwnd, TBM_GETLINESIZE, 0, 0, SEND_TIMEOUT_MS, &step);
         vertical = (style & TBS_VERT) != 0;
     }
     else if (!lstrcmpiW(cls, L"msctls_progress32"))
     {
-        if (!SendMessageTimeoutW(hwnd, PBM_GETPOS, 0, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
-            !SendMessageTimeoutW(hwnd, PBM_GETRANGE, TRUE, 0, SMTO_ABORTIFHUNG, 500, &low) ||
-            !SendMessageTimeoutW(hwnd, PBM_GETRANGE, FALSE, 0, SMTO_ABORTIFHUNG, 500, &high))
+        if (!send_message(hwnd, PBM_GETPOS, 0, 0, SEND_TIMEOUT_MS, &pos) ||
+            !send_message(hwnd, PBM_GETRANGE, TRUE, 0, SEND_TIMEOUT_MS, &low) ||
+            !send_message(hwnd, PBM_GETRANGE, FALSE, 0, SEND_TIMEOUT_MS, &high))
             return;
         vertical = (style & PBS_VERTICAL) != 0;
     }
     else if (!lstrcmpiW(cls, L"msctls_updown32"))
     {
         if (!updown_range(hwnd, &low, &high) ||
-            !SendMessageTimeoutW(hwnd, UDM_GETPOS32, 0, 0, SMTO_ABORTIFHUNG, 500, &pos))
+            !send_message(hwnd, UDM_GETPOS32, 0, 0, SEND_TIMEOUT_MS, &pos))
             return;
         step = 1;
         vertical = !(style & UDS_HORZ);

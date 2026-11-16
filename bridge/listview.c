@@ -81,11 +81,11 @@ int listview_columns(HWND hwnd, struct remote *r, int *order)
     SIZE_T done;
     int i;
 
-    if (!SendMessageTimeoutW(hwnd, LVM_GETVIEW, 0, 0, SMTO_ABORTIFHUNG, 500, &view) ||
+    if (!send_message(hwnd, LVM_GETVIEW, 0, 0, SEND_TIMEOUT_MS, &view) ||
         view != LV_VIEW_DETAILS ||
-        !SendMessageTimeoutW(hwnd, LVM_GETHEADER, 0, 0, SMTO_ABORTIFHUNG, 500, &header) ||
+        !send_message(hwnd, LVM_GETHEADER, 0, 0, SEND_TIMEOUT_MS, &header) ||
         !header ||
-        !SendMessageTimeoutW((HWND)header, HDM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) ||
+        !send_message((HWND)header, HDM_GETITEMCOUNT, 0, 0, SEND_TIMEOUT_MS, &count) ||
         (LONG)count <= 0)
         return 0;
     for (i = 0; i < MAX_COLUMNS; i++)
@@ -93,8 +93,8 @@ int listview_columns(HWND hwnd, struct remote *r, int *order)
     /* The header wants room for all columns (header.c, HEADER_GetOrderArray). */
     if (count > MAX_COLUMNS)
         return MAX_COLUMNS;
-    if (SendMessageTimeoutW(hwnd, LVM_GETCOLUMNORDERARRAY, count, (LPARAM)r->base,
-                            SMTO_ABORTIFHUNG, 500, &ok) && ok &&
+    if (send_message(hwnd, LVM_GETCOLUMNORDERARRAY, count, (LPARAM)r->base,
+                     SEND_TIMEOUT_MS, &ok) && ok &&
         ReadProcessMemory(r->process, r->base, order, count * sizeof(int), &done))
     {
         for (i = 0; i < (int)count; i++)
@@ -109,8 +109,8 @@ static int listview_focus_index(HWND hwnd)
 {
     DWORD_PTR item = (DWORD_PTR)-1;
 
-    if (!SendMessageTimeoutW(hwnd, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED,
-                             SMTO_ABORTIFHUNG, 500, &item))
+    if (!send_message(hwnd, LVM_GETNEXTITEM, (WPARAM)-1, LVNI_FOCUSED,
+                      SEND_TIMEOUT_MS, &item))
         return LIST_BUSY;
     return (int)item;
 }
@@ -119,7 +119,7 @@ static void get_listview_info(HWND hwnd, struct remote *r, struct listview_info 
 {
     info->columns = listview_columns(hwnd, r, info->order);
     info->count = 0;
-    SendMessageTimeoutW(hwnd, LVM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &info->count);
+    send_message(hwnd, LVM_GETITEMCOUNT, 0, 0, SEND_TIMEOUT_MS, &info->count);
     info->have_cells = FALSE;
 }
 
@@ -227,8 +227,8 @@ static BOOL describe_listview_item_in(HWND hwnd, struct remote *r, struct listvi
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE);
-    SendMessageTimeoutW(hwnd, LVM_GETITEMSTATE, item, LVIS_FOCUSED | LVIS_SELECTED,
-                        SMTO_ABORTIFHUNG, 500, &state);
+    send_message(hwnd, LVM_GETITEMSTATE, item, LVIS_FOCUSED | LVIS_SELECTED,
+                 SEND_TIMEOUT_MS, &state);
     if (state & LVIS_FOCUSED)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
     if (state & LVIS_SELECTED)
@@ -295,8 +295,8 @@ static void add_listview_items(struct tree_build *b, HWND hwnd)
      * each item is checked against the client area.
      */
     get_listview_info(hwnd, &r, &info);
-    if (!SendMessageTimeoutW(hwnd, LVM_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
-        !SendMessageTimeoutW(hwnd, LVM_GETCOUNTPERPAGE, 0, 0, SMTO_ABORTIFHUNG, 500, &page))
+    if (!send_message(hwnd, LVM_GETTOPINDEX, 0, 0, SEND_TIMEOUT_MS, &top) ||
+        !send_message(hwnd, LVM_GETCOUNTPERPAGE, 0, 0, SEND_TIMEOUT_MS, &page))
         top = page = info.count = 0;
     /* One more for a row cut at the bottom. */
     end = (int)min(info.count, top + page + 1);

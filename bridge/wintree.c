@@ -38,7 +38,7 @@ static enum tree_kind tree_kind(HWND hwnd, const WCHAR *cls)
         return TREE_SKIP;
     /* An up-down is part of its buddy's spin button, see find_updown. */
     if (!lstrcmpiW(cls, L"msctls_updown32") &&
-        SendMessageTimeoutW(hwnd, UDM_GETBUDDY, 0, 0, SMTO_ABORTIFHUNG, 100, &buddy) &&
+        send_message(hwnd, UDM_GETBUDDY, 0, 0, 100, &buddy) &&
         buddy && GetClassNameW((HWND)buddy, buddy_cls, ARRAYSIZE(buddy_cls)) &&
         !lstrcmpiW(buddy_cls, L"Edit"))
         return TREE_SKIP;

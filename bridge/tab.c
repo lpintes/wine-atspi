@@ -21,7 +21,7 @@ static int tab_focus_index(HWND hwnd)
 {
     DWORD_PTR item = (DWORD_PTR)-1;
 
-    if (!SendMessageTimeoutW(hwnd, TCM_GETCURFOCUS, 0, 0, SMTO_ABORTIFHUNG, 500, &item))
+    if (!send_message(hwnd, TCM_GETCURFOCUS, 0, 0, SEND_TIMEOUT_MS, &item))
         return LIST_BUSY;
     return (int)item;
 }
@@ -67,10 +67,10 @@ static BOOL describe_tab_item_in(HWND hwnd, struct remote *r, int item,
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
-    if (SendMessageTimeoutW(hwnd, TCM_GETCURSEL, 0, 0, SMTO_ABORTIFHUNG, 500, &selected) &&
+    if (send_message(hwnd, TCM_GETCURSEL, 0, 0, SEND_TIMEOUT_MS, &selected) &&
         (int)selected == item)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
-    SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count);
+    send_message(hwnd, TCM_GETITEMCOUNT, 0, 0, SEND_TIMEOUT_MS, &count);
     obj->position = item + 1;
     obj->set_size = (int)count;
     return TRUE;
@@ -114,7 +114,7 @@ static void tab_describe_self(HWND hwnd, struct bridge_object *obj, struct focus
     DWORD_PTR count = 0;
 
     obj->role = BRIDGE_ROLE_PAGE_TAB_LIST;
-    if (SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) &&
+    if (send_message(hwnd, TCM_GETITEMCOUNT, 0, 0, SEND_TIMEOUT_MS, &count) &&
         (LONG)count >= 0)
         obj->set_size = (int)count;
 }
@@ -128,7 +128,7 @@ static void add_tab_items(struct tree_build *b, HWND hwnd)
 
     if (!remote_open(hwnd, &r))
         return;
-    if (!SendMessageTimeoutW(hwnd, TCM_GETITEMCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+    if (!send_message(hwnd, TCM_GETITEMCOUNT, 0, 0, SEND_TIMEOUT_MS, &count))
         count = 0;
     for (i = 0; i < (int)count && (obj = tree_item_slot(b)); i++)
         tree_item_done(b, describe_tab_item_in(hwnd, &r, i, obj, b->str));

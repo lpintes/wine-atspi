@@ -53,7 +53,7 @@ static BOOL caret_at_start(HWND hwnd, DWORD start)
     gti.cbSize = sizeof(gti);
     if (!GetGUIThreadInfo(GetWindowThreadProcessId(hwnd, NULL), &gti) ||
         gti.hwndCaret != hwnd ||
-        !SendMessageTimeoutW(hwnd, EM_POSFROMCHAR, start, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
+        !send_message(hwnd, EM_POSFROMCHAR, start, 0, SEND_TIMEOUT_MS, &pos) ||
         pos == (DWORD_PTR)-1)
         return FALSE;
     return (short)LOWORD(pos) == gti.rcCaret.left && (short)HIWORD(pos) == gti.rcCaret.top;
@@ -68,19 +68,19 @@ void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
     WCHAR *buf, *src, *dst;
     int size, i, n;
 
-    if (!SendMessageTimeoutW(hwnd, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, 500, &len))
+    if (!send_message(hwnd, WM_GETTEXTLENGTH, 0, 0, SEND_TIMEOUT_MS, &len))
         return;
     if (len > TEXT_MAX_CHARS)
         len = TEXT_MAX_CHARS;
     buf = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
     if (!buf)
         return;
-    if (!SendMessageTimeoutW(hwnd, WM_GETTEXT, len + 1, (LPARAM)buf, SMTO_ABORTIFHUNG, 500, &len))
+    if (!send_message(hwnd, WM_GETTEXT, len + 1, (LPARAM)buf, SEND_TIMEOUT_MS, &len))
         len = 0;
     buf[len] = 0;
     n = len;
     /* Pointer arguments of EM_GETSEL are marshalled like on Windows. */
-    SendMessageTimeoutW(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end, SMTO_ABORTIFHUNG, 500, NULL);
+    send_message(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end, SEND_TIMEOUT_MS, NULL);
     start_index = rich ? rich_text_index(buf, n, start) : start;
     end_index = rich ? rich_text_index(buf, n, end) : end;
     obj->selection_start = char_offset(buf, n, start_index);
@@ -137,7 +137,7 @@ static BOOL text_pos(HWND hwnd, int index, POINT *pt)
 {
     DWORD_PTR pos;
 
-    if (!SendMessageTimeoutW(hwnd, EM_POSFROMCHAR, index, 0, SMTO_ABORTIFHUNG, 500, &pos) ||
+    if (!send_message(hwnd, EM_POSFROMCHAR, index, 0, SEND_TIMEOUT_MS, &pos) ||
         pos == (DWORD_PTR)-1)
         return FALSE;
     pt->x = (short)LOWORD(pos);
@@ -149,7 +149,7 @@ static int text_send(HWND hwnd, UINT msg, WPARAM wparam)
 {
     DWORD_PTR result = 0;
 
-    SendMessageTimeoutW(hwnd, msg, wparam, 0, SMTO_ABORTIFHUNG, 500, &result);
+    send_message(hwnd, msg, wparam, 0, SEND_TIMEOUT_MS, &result);
     return (int)result;
 }
 

@@ -152,7 +152,7 @@ static void refine_class_states(HWND hwnd, struct bridge_object *obj)
 
     if (obj->role != BRIDGE_ROLE_CHECK_BOX && obj->role != BRIDGE_ROLE_RADIO_BUTTON)
         return;
-    SendMessageTimeoutW(hwnd, BM_GETCHECK, 0, 0, SMTO_ABORTIFHUNG, 500, &check);
+    send_message(hwnd, BM_GETCHECK, 0, 0, SEND_TIMEOUT_MS, &check);
     if (check == BST_CHECKED)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_CHECKED);
     else if (check == BST_INDETERMINATE)
@@ -285,6 +285,13 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
             return TRUE;
         id_child = CHILDID_SELF;
     }
+    /*
+     * Wine's oleacc sends WM_GETOBJECT and WM_GETTEXT without a timeout
+     * (dlls/oleacc/main.c, client.c), so a busy target would block the
+     * bridge. Ask it once with a timeout first.
+     */
+    if (!send_message(hwnd, WM_NULL, 0, 0, SEND_TIMEOUT_MS, NULL))
+        return FALSE;
     VariantInit(&child);
     if (FAILED(AccessibleObjectFromEvent(hwnd, id_object, id_child, &acc, &child)) || !acc)
         return FALSE;

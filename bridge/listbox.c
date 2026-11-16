@@ -26,7 +26,7 @@ static void describe_list_selection(HWND hwnd, BOOL listview, struct bridge_obje
          */
         if (!(obj->states & BRIDGE_STATE_BIT(BRIDGE_STATE_MULTISELECTABLE)))
         {
-            if (SendMessageTimeoutW(hwnd, LB_GETCURSEL, 0, 0, SMTO_ABORTIFHUNG, 500, &item) &&
+            if (send_message(hwnd, LB_GETCURSEL, 0, 0, SEND_TIMEOUT_MS, &item) &&
                 (int)item >= 0)
             {
                 str->selected_rows[0] = (int)item;
@@ -34,24 +34,24 @@ static void describe_list_selection(HWND hwnd, BOOL listview, struct bridge_obje
             }
             return;
         }
-        if (!SendMessageTimeoutW(hwnd, LB_GETSELCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) ||
+        if (!send_message(hwnd, LB_GETSELCOUNT, 0, 0, SEND_TIMEOUT_MS, &count) ||
             (int)count <= 0 ||
-            !SendMessageTimeoutW(hwnd, LB_GETSELITEMS, MAX_SELECTED_ROWS,
-                                 (LPARAM)str->selected_rows, SMTO_ABORTIFHUNG, 500, &item) ||
+            !send_message(hwnd, LB_GETSELITEMS, MAX_SELECTED_ROWS,
+                          (LPARAM)str->selected_rows, SEND_TIMEOUT_MS, &item) ||
             (int)item < 0)
             return;
         obj->selected_count = (int)count;
         obj->selected_listed = (int)item;
         return;
     }
-    if (!SendMessageTimeoutW(hwnd, LVM_GETSELECTEDCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count) ||
+    if (!send_message(hwnd, LVM_GETSELECTEDCOUNT, 0, 0, SEND_TIMEOUT_MS, &count) ||
         (LONG)count <= 0)
         return;
     obj->selected_count = (int)count;
     while (obj->selected_listed < obj->selected_count &&
            obj->selected_listed < MAX_SELECTED_ROWS &&
-           SendMessageTimeoutW(hwnd, LVM_GETNEXTITEM, item, LVNI_SELECTED,
-                               SMTO_ABORTIFHUNG, 500, &item) && (int)item >= 0)
+           send_message(hwnd, LVM_GETNEXTITEM, item, LVNI_SELECTED,
+                        SEND_TIMEOUT_MS, &item) && (int)item >= 0)
         str->selected_rows[obj->selected_listed++] = (int)item;
 }
 
@@ -76,8 +76,8 @@ void describe_list_box(HWND hwnd, BOOL listview, struct bridge_object *obj,
     obj->role = BRIDGE_ROLE_LIST_BOX;
     if (listview ? !(style & LVS_SINGLESEL) : (style & (LBS_MULTIPLESEL | LBS_EXTENDEDSEL)) != 0)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_MULTISELECTABLE);
-    if (SendMessageTimeoutW(hwnd, listview ? LVM_GETITEMCOUNT : LB_GETCOUNT, 0, 0,
-                            SMTO_ABORTIFHUNG, 500, &count) && (LONG)count >= 0)
+    if (send_message(hwnd, listview ? LVM_GETITEMCOUNT : LB_GETCOUNT, 0, 0,
+                     SEND_TIMEOUT_MS, &count) && (LONG)count >= 0)
         obj->set_size = (int)count;
     describe_list_selection(hwnd, listview, obj, str);
     if (!listview || !remote_open(hwnd, &r))
@@ -122,7 +122,7 @@ static BOOL winefile_entry_name(HWND hwnd, int item, char *buf, int size)
     get_app_name(pid, app, sizeof(app));
     if (lstrcmpiA(app, "winefile"))
         return FALSE;
-    if (!SendMessageTimeoutW(hwnd, LB_GETITEMDATA, item, 0, SMTO_ABORTIFHUNG, 500, &entry) ||
+    if (!send_message(hwnd, LB_GETITEMDATA, item, 0, SEND_TIMEOUT_MS, &entry) ||
         !entry || (LONG_PTR)entry == LB_ERR)
         return FALSE;
     if (!(process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)))
@@ -156,7 +156,7 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
     WCHAR *text;
     RECT rect;
 
-    if (!SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+    if (!send_message(hwnd, LB_GETCOUNT, 0, 0, SEND_TIMEOUT_MS, &count))
         return LIST_BUSY;
     if (item < 0 || item >= (LONG)count)
         return FALSE;
@@ -168,13 +168,13 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
     obj->name = str->object;
     if (!(style & (LBS_OWNERDRAWFIXED | LBS_OWNERDRAWVARIABLE)) || (style & LBS_HASSTRINGS))
     {
-        if (!SendMessageTimeoutW(hwnd, LB_GETTEXTLEN, item, 0, SMTO_ABORTIFHUNG, 500, &len))
+        if (!send_message(hwnd, LB_GETTEXTLEN, item, 0, SEND_TIMEOUT_MS, &len))
             return LIST_BUSY;
         if ((LONG)len > 0 && (text = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR))))
         {
             text[0] = 0;
-            if (SendMessageTimeoutW(hwnd, LB_GETTEXT, item, (LPARAM)text,
-                                    SMTO_ABORTIFHUNG, 500, &len) && (LONG)len >= 0)
+            if (send_message(hwnd, LB_GETTEXT, item, (LPARAM)text,
+                             SEND_TIMEOUT_MS, &len) && (LONG)len >= 0)
             {
                 text[len] = 0;
                 to_utf8(text, str->object, sizeof(str->object));
@@ -191,12 +191,12 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTABLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
-    if (SendMessageTimeoutW(hwnd, LB_GETSEL, item, 0, SMTO_ABORTIFHUNG, 500, &sel) &&
+    if (send_message(hwnd, LB_GETSEL, item, 0, SEND_TIMEOUT_MS, &sel) &&
         (LONG)sel > 0)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
     obj->has_extents = FALSE;
-    if (SendMessageTimeoutW(hwnd, LB_GETITEMRECT, item, (LPARAM)&rect,
-                            SMTO_ABORTIFHUNG, 500, &ret) && (LONG)ret != LB_ERR)
+    if (send_message(hwnd, LB_GETITEMRECT, item, (LPARAM)&rect,
+                     SEND_TIMEOUT_MS, &ret) && (LONG)ret != LB_ERR)
         set_item_extents(hwnd, rect, obj);
     obj->position = item + 1;
     obj->set_size = (int)count;
@@ -223,7 +223,7 @@ static LONG listbox_focus(HWND hwnd)
 {
     DWORD_PTR caret = LB_ERR;
 
-    if (!SendMessageTimeoutW(hwnd, LB_GETCARETINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &caret))
+    if (!send_message(hwnd, LB_GETCARETINDEX, 0, 0, SEND_TIMEOUT_MS, &caret))
         return LIST_BUSY;
     return (LONG)caret < 0 ? 0 : (LONG)caret + 1;
 }
@@ -241,8 +241,8 @@ static void add_listbox_items(struct tree_build *b, HWND hwnd)
     struct bridge_object *obj;
     int i;
 
-    if (!SendMessageTimeoutW(hwnd, LB_GETTOPINDEX, 0, 0, SMTO_ABORTIFHUNG, 500, &top) ||
-        !SendMessageTimeoutW(hwnd, LB_GETCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+    if (!send_message(hwnd, LB_GETTOPINDEX, 0, 0, SEND_TIMEOUT_MS, &top) ||
+        !send_message(hwnd, LB_GETCOUNT, 0, 0, SEND_TIMEOUT_MS, &count))
         return;
     for (i = (int)top; i < (int)count && (obj = tree_item_slot(b)); i++)
         if (!tree_item_done(b, describe_listbox_item(hwnd, i, obj, b->str) == TRUE))

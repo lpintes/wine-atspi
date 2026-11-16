@@ -210,6 +210,15 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
 - After an arrow key in the Open dialog's file list the dialog thread is
   busy for 0.3 to over 0.5 s (WSL, folder on `/mnt/c`), so list view
   queries can time out; the key check retries a busy list.
+- Wine's `oleacc` sends `WM_GETOBJECT` and `WM_GETTEXT` with plain
+  `SendMessageW` (`dlls/oleacc/main.c`, `client.c`), so MSAA on a busy
+  target blocks the bridge. `describe_object` therefore asks with
+  `WM_NULL` and a timeout first. All messages go through `send_message`
+  (`util.c`): after a timeout (Wine sets `ERROR_TIMEOUT` for a timeout
+  and for a hung thread) the thread is skipped for 40 ms, so one pass
+  waits once. Ctrl+O in notepad keeps its thread busy for over 500 ms
+  while the Open dialog is created; a focus or key check that finds the
+  target busy is retried (`check_busy_focus`, `check_after_key`).
 - `atspi.c` uses only GLib functions, never libc ones directly. The
   binary imports msvcrt through Wine, and a libc name could bind to an
   ms_abi msvcrt thunk. Not proven to break, just avoided.

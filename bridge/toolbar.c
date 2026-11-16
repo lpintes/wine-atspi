@@ -37,8 +37,8 @@ static void get_toolbar_tooltip(HWND hwnd, struct remote *r, int command, WCHAR 
     if (!message)
         message = RegisterWindowMessageW(TOOLTIP_MESSAGE);
     if (!message || !WriteProcessMemory(r->process, r->base, L"", sizeof(WCHAR), &done) ||
-        !SendMessageTimeoutW(hwnd, message, command, (LPARAM)r->base, SMTO_ABORTIFHUNG, 500,
-                             &ret) ||
+        !send_message(hwnd, message, command, (LPARAM)r->base, SEND_TIMEOUT_MS,
+                      &ret) ||
         !ReadProcessMemory(r->process, r->base, text, TOOLTIP_TEXT_MAX * sizeof(WCHAR), &done))
         text[0] = 0;
     text[TOOLTIP_TEXT_MAX - 1] = 0;
@@ -70,8 +70,8 @@ static int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
                   info->cbSize = sizeof(*info);
                   info->dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE | TBIF_STYLE;);
     if (!WriteProcessMemory(r->process, r->base, header, sizeof(header), &done) ||
-        !SendMessageTimeoutW(hwnd, TB_GETBUTTONINFOW, index, (LPARAM)r->base,
-                             SMTO_ABORTIFHUNG, 500, &ret) || (int)ret != index ||
+        !send_message(hwnd, TB_GETBUTTONINFOW, index, (LPARAM)r->base,
+                      SEND_TIMEOUT_MS, &ret) || (int)ret != index ||
         !ReadProcessMemory(r->process, r->base, header, sizeof(header), &done))
         return FALSE;
     REMOTE_STRUCT(r, header, TBBUTTONINFOW, struct tbbuttoninfo32, info,
@@ -82,11 +82,11 @@ static int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
         return -1;
 
     text[0] = 0;
-    if (SendMessageTimeoutW(hwnd, TB_GETBUTTONTEXTW, command, 0, SMTO_ABORTIFHUNG, 500, &len) &&
+    if (send_message(hwnd, TB_GETBUTTONTEXTW, command, 0, SEND_TIMEOUT_MS, &len) &&
         (int)len > 0 && len < CELL_TEXT_MAX &&
         WriteProcessMemory(r->process, r->base, L"", sizeof(WCHAR), &done) &&
-        SendMessageTimeoutW(hwnd, TB_GETBUTTONTEXTW, command, (LPARAM)r->base,
-                            SMTO_ABORTIFHUNG, 500, &ret) &&
+        send_message(hwnd, TB_GETBUTTONTEXTW, command, (LPARAM)r->base,
+                     SEND_TIMEOUT_MS, &ret) &&
         ReadProcessMemory(r->process, r->base, text, (len + 1) * sizeof(WCHAR), &done))
         text[len] = 0;
     if (!text[0])
@@ -139,7 +139,7 @@ static int toolbar_focus_index(HWND hwnd)
 {
     DWORD_PTR item = (DWORD_PTR)-1;
 
-    if (!SendMessageTimeoutW(hwnd, TB_GETHOTITEM, 0, 0, SMTO_ABORTIFHUNG, 500, &item))
+    if (!send_message(hwnd, TB_GETHOTITEM, 0, 0, SEND_TIMEOUT_MS, &item))
         return LIST_BUSY;
     return (int)item;
 }
@@ -180,7 +180,7 @@ static void add_toolbar_items(struct tree_build *b, HWND hwnd)
 
     if (!remote_open(hwnd, &r))
         return;
-    if (!SendMessageTimeoutW(hwnd, TB_BUTTONCOUNT, 0, 0, SMTO_ABORTIFHUNG, 500, &count))
+    if (!send_message(hwnd, TB_BUTTONCOUNT, 0, 0, SEND_TIMEOUT_MS, &count))
         count = 0;
     for (i = 0; i < (int)count && (obj = tree_item_slot(b)); i++)
     {

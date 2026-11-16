@@ -112,6 +112,26 @@ static void CALLBACK poll_console(HWND unused, UINT msg, UINT_PTR id, DWORD time
     free_strings(&str);
 }
 
+/*
+ * A focus in a busy target is looked for again this often and this many
+ * times. Ctrl+O in notepad keeps its thread busy for over 500 ms while
+ * the Open dialog is created, and its focus would be lost (WSL,
+ * 2026-11-16).
+ */
+#define BUSY_FOCUS_DELAY_MS 100
+#define BUSY_FOCUS_RETRIES 5
+
+static UINT_PTR busy_focus_timer;
+static int busy_focus_retries;
+
+static void CALLBACK check_busy_focus(HWND unused, UINT msg, UINT_PTR id, DWORD time)
+{
+    KillTimer(NULL, id);
+    busy_focus_timer = 0;
+    trace(L"busy focus: retry %d", busy_focus_retries);
+    check_missed_focus();
+}
+
 void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 {
     struct bridge_focus focus;
@@ -125,7 +145,12 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
         top = hwnd;
     memset(&focus, 0, sizeof(focus));
     if (!describe_object(hwnd, id_object, id_child, &focus.object, &str))
+    {
+        if (is_busy(hwnd) && !busy_focus_timer && busy_focus_retries++ < BUSY_FOCUS_RETRIES)
+            busy_focus_timer = SetTimer(NULL, 0, BUSY_FOCUS_DELAY_MS, check_busy_focus);
         return;
+    }
+    busy_focus_retries = 0;
     describe_frame(top, &focus.frame, &str);
     describe_labels(top, &focus, &str);
     if (focus.object.child && id_object == OBJID_CLIENT &&
@@ -249,6 +274,8 @@ static void CALLBACK report_pending_focus(HWND unused, UINT msg, UINT_PTR id, DW
         return;
     }
     last_focus.recovered = FALSE;
+    /* A new event: a busy target may be waited for again. */
+    busy_focus_retries = 0;
     if (is_stale_focus(hwnd, id_object, id_child))
     {
         trace(L"transient focus: %p", hwnd);
@@ -329,6 +356,12 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
     memset(&obj, 0, sizeof(obj));
     if (!describe_object(hwnd, last_focus.id_object, last_focus.id_child, &obj, &str))
     {
+        if (is_busy(hwnd) && key_retries++ < KEY_CHECK_RETRIES)
+        {
+            trace(L"key check: %p busy, retry %d", hwnd, key_retries);
+            key_timer = SetTimer(NULL, 0, KEY_CHECK_DELAY_MS, check_after_key);
+            return;
+        }
         report_status_bar(GetAncestor(hwnd, GA_ROOT));
         return;
     }
@@ -436,7 +469,8 @@ void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
  */
 void forget_focus(void)
 {
-    UINT_PTR *timers[] = { &focus_timer, &foreground_timer, &key_timer, &console_timer };
+    UINT_PTR *timers[] = { &focus_timer, &foreground_timer, &key_timer, &console_timer,
+                           &busy_focus_timer };
     unsigned int i;
 
     for (i = 0; i < ARRAYSIZE(timers); i++)
@@ -445,7 +479,7 @@ void forget_focus(void)
             KillTimer(NULL, *timers[i]);
         *timers[i] = 0;
     }
-    key_retries = 0;
+    key_retries = busy_focus_retries = 0;
     memset(&pending_focus, 0, sizeof(pending_focus));
     memset(&last_focus, 0, sizeof(last_focus));
     last_status.hwnd = NULL;

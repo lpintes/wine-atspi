@@ -35,6 +35,8 @@
 #define LABEL_MAX_UTF8 2048
 /* All parts of a status bar, in UTF-16 units; see report_status_bar. */
 #define STATUS_TEXT_MAX 1024
+/* How long send_message waits for a target. */
+#define SEND_TIMEOUT_MS 500
 /* A status bar is read after each key: do not wait long for a busy target. */
 #define STATUS_TIMEOUT_MS 100
 
@@ -217,6 +219,9 @@ void WINAPIV trace(const WCHAR *format, ...);
 void print_line(const WCHAR *text);
 void free_strings(struct focus_strings *str);
 void to_utf8(const WCHAR *src, char *dst, int size);
+BOOL send_message(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT timeout,
+                  DWORD_PTR *result);
+BOOL is_busy(HWND hwnd);
 void get_window_text(HWND hwnd, char *dst, int size);
 void get_app_name(DWORD pid, char *dst, int size);
 void get_class(HWND hwnd, WCHAR *cls, int len, char *dst, int size);
