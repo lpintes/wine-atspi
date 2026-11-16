@@ -50,22 +50,10 @@ static BOOL get_listview_text(HWND hwnd, struct remote *r, int item, int subitem
     BYTE header[REMOTE_HEADER];
 
     memset(header, 0, sizeof(header));
-    if (r->wow64)
-    {
-        struct lvitem32 *lv = (struct lvitem32 *)header;
-
-        lv->iSubItem = subitem;
-        lv->pszText = (ULONG)(ULONG_PTR)(r->base + REMOTE_HEADER);
-        lv->cchTextMax = CELL_TEXT_MAX;
-    }
-    else
-    {
-        LVITEMW *lv = (LVITEMW *)header;
-
-        lv->iSubItem = subitem;
-        lv->pszText = (WCHAR *)(r->base + REMOTE_HEADER);
-        lv->cchTextMax = CELL_TEXT_MAX;
-    }
+    REMOTE_STRUCT(r, header, LVITEMW, struct lvitem32, lv,
+                  lv->iSubItem = subitem;
+                  REMOTE_PTR(lv->pszText, REMOTE_TEXT(r));
+                  lv->cchTextMax = CELL_TEXT_MAX;);
     return remote_text(hwnd, r, LVM_GETITEMTEXTW, item, header, buf);
 }
 
@@ -75,22 +63,10 @@ BOOL get_listview_header(HWND hwnd, struct remote *r, int column, WCHAR *buf)
     BYTE header[REMOTE_HEADER];
 
     memset(header, 0, sizeof(header));
-    if (r->wow64)
-    {
-        struct lvcolumn32 *lv = (struct lvcolumn32 *)header;
-
-        lv->mask = LVCF_TEXT;
-        lv->pszText = (ULONG)(ULONG_PTR)(r->base + REMOTE_HEADER);
-        lv->cchTextMax = CELL_TEXT_MAX;
-    }
-    else
-    {
-        LVCOLUMNW *lv = (LVCOLUMNW *)header;
-
-        lv->mask = LVCF_TEXT;
-        lv->pszText = (WCHAR *)(r->base + REMOTE_HEADER);
-        lv->cchTextMax = CELL_TEXT_MAX;
-    }
+    REMOTE_STRUCT(r, header, LVCOLUMNW, struct lvcolumn32, lv,
+                  lv->mask = LVCF_TEXT;
+                  REMOTE_PTR(lv->pszText, REMOTE_TEXT(r));
+                  lv->cchTextMax = CELL_TEXT_MAX;);
     return remote_text(hwnd, r, LVM_GETCOLUMNW, column, header, buf);
 }
 

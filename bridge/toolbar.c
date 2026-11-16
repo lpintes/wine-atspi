@@ -66,41 +66,18 @@ static int describe_toolbar_button_in(HWND hwnd, struct remote *r, int index,
     SIZE_T done;
 
     memset(header, 0, sizeof(header));
-    if (r->wow64)
-    {
-        struct tbbuttoninfo32 *info = (struct tbbuttoninfo32 *)header;
-
-        info->cbSize = sizeof(*info);
-        info->dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE | TBIF_STYLE;
-    }
-    else
-    {
-        TBBUTTONINFOW *info = (TBBUTTONINFOW *)header;
-
-        info->cbSize = sizeof(*info);
-        info->dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE | TBIF_STYLE;
-    }
+    REMOTE_STRUCT(r, header, TBBUTTONINFOW, struct tbbuttoninfo32, info,
+                  info->cbSize = sizeof(*info);
+                  info->dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE | TBIF_STYLE;);
     if (!WriteProcessMemory(r->process, r->base, header, sizeof(header), &done) ||
         !SendMessageTimeoutW(hwnd, TB_GETBUTTONINFOW, index, (LPARAM)r->base,
                              SMTO_ABORTIFHUNG, 500, &ret) || (int)ret != index ||
         !ReadProcessMemory(r->process, r->base, header, sizeof(header), &done))
         return FALSE;
-    if (r->wow64)
-    {
-        struct tbbuttoninfo32 *info = (struct tbbuttoninfo32 *)header;
-
-        command = info->idCommand;
-        state = info->fsState;
-        style = info->fsStyle;
-    }
-    else
-    {
-        TBBUTTONINFOW *info = (TBBUTTONINFOW *)header;
-
-        command = info->idCommand;
-        state = info->fsState;
-        style = info->fsStyle;
-    }
+    REMOTE_STRUCT(r, header, TBBUTTONINFOW, struct tbbuttoninfo32, info,
+                  command = info->idCommand;
+                  state = info->fsState;
+                  style = info->fsStyle;);
     if ((style & BTNS_SEP) || (state & TBSTATE_HIDDEN))
         return -1;
 

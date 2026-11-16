@@ -104,53 +104,25 @@ static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM ite
     BOOL ok;
 
     memset(header, 0, sizeof(header));
-    if (r->wow64)
-    {
-        struct tvitem32 *tv = (struct tvitem32 *)header;
-
-        tv->mask = TVIF_HANDLE | TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN;
-        tv->hItem = (ULONG)(ULONG_PTR)item;
-        tv->stateMask = TVIS_SELECTED | TVIS_EXPANDED;
-        tv->pszText = (ULONG)(ULONG_PTR)(r->base + REMOTE_HEADER);
-        tv->cchTextMax = CELL_TEXT_MAX;
-    }
-    else
-    {
-        TVITEMW *tv = (TVITEMW *)header;
-
-        tv->mask = TVIF_HANDLE | TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN;
-        tv->hItem = item;
-        tv->stateMask = TVIS_SELECTED | TVIS_EXPANDED;
-        tv->pszText = (WCHAR *)(r->base + REMOTE_HEADER);
-        tv->cchTextMax = CELL_TEXT_MAX;
-    }
+    REMOTE_STRUCT(r, header, TVITEMW, struct tvitem32, tv,
+                  tv->mask = TVIF_HANDLE | TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN;
+                  REMOTE_PTR(tv->hItem, item);
+                  tv->stateMask = TVIS_SELECTED | TVIS_EXPANDED;
+                  REMOTE_PTR(tv->pszText, REMOTE_TEXT(r));
+                  tv->cchTextMax = CELL_TEXT_MAX;);
     ok = remote_text(hwnd, r, TVM_GETITEMW, 0, header, text) &&
          ReadProcessMemory(r->process, r->base, header, sizeof(header), &done);
     /* The item goes in the RECT, as a handle of the target's size; FALSE if scrolled away. */
     memset(&rect, 0, sizeof(rect));
-    if (r->wow64)
-    {
-        ULONG item32 = (ULONG)(ULONG_PTR)item;
-
-        memcpy(&rect, &item32, sizeof(item32));
-    }
-    else
-        memcpy(&rect, &item, sizeof(item));
+    REMOTE_STRUCT(r, &rect, HTREEITEM, ULONG, handle, REMOTE_PTR(*handle, item););
     obj->has_extents = FALSE;
     if (ok && remote_rect(hwnd, r, TVM_GETITEMRECT, TRUE, &rect))
         set_item_extents(hwnd, rect, obj);
     if (!ok)
         return FALSE;
-    if (r->wow64)
-    {
-        state = ((struct tvitem32 *)header)->state;
-        children = ((struct tvitem32 *)header)->cChildren;
-    }
-    else
-    {
-        state = ((TVITEMW *)header)->state;
-        children = ((TVITEMW *)header)->cChildren;
-    }
+    REMOTE_STRUCT(r, header, TVITEMW, struct tvitem32, tv,
+                  state = tv->state;
+                  children = tv->cChildren;);
 
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->child = tree_child_id(item);

@@ -79,6 +79,33 @@ struct remote
 };
 
 /*
+ * Runs the statements on the structure at header as the target sees it:
+ * type32 in a 32-bit (WoW64) target, type64 otherwise. Each type32
+ * repeats the field names of its native type up to the fields used, so
+ * one body serves both; REMOTE_PTR stores a pointer or handle in a
+ * field of the target's size.
+ */
+#define REMOTE_STRUCT(r, header, type64, type32, var, ...)  \
+    do                                                      \
+    {                                                       \
+        if ((r)->wow64)                                     \
+        {                                                   \
+            type32 *var = (type32 *)(header);               \
+            __VA_ARGS__                                     \
+        }                                                   \
+        else                                                \
+        {                                                   \
+            type64 *var = (type64 *)(header);               \
+            __VA_ARGS__                                     \
+        }                                                   \
+    } while (0)
+
+#define REMOTE_PTR(field, value) ((field) = (__typeof__(field))(ULONG_PTR)(value))
+
+/* Where remote_text has the target write its text. */
+#define REMOTE_TEXT(r) ((r)->base + REMOTE_HEADER)
+
+/*
  * Index of the focused item of a list view, -1 if none. LIST_BUSY if the
  * target did not answer in time: the Open dialog's list keeps its thread
  * busy for over 500 ms after an arrow key (WSL, 2026-11-06).

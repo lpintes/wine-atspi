@@ -43,22 +43,10 @@ static BOOL describe_tab_item_in(HWND hwnd, struct remote *r, int item,
     BOOL ok;
 
     memset(header, 0, sizeof(header));
-    if (r->wow64)
-    {
-        struct tcitem32 *tc = (struct tcitem32 *)header;
-
-        tc->mask = TCIF_TEXT;
-        tc->pszText = (ULONG)(ULONG_PTR)(r->base + REMOTE_HEADER);
-        tc->cchTextMax = CELL_TEXT_MAX;
-    }
-    else
-    {
-        TCITEMW *tc = (TCITEMW *)header;
-
-        tc->mask = TCIF_TEXT;
-        tc->pszText = (WCHAR *)(r->base + REMOTE_HEADER);
-        tc->cchTextMax = CELL_TEXT_MAX;
-    }
+    REMOTE_STRUCT(r, header, TCITEMW, struct tcitem32, tc,
+                  tc->mask = TCIF_TEXT;
+                  REMOTE_PTR(tc->pszText, REMOTE_TEXT(r));
+                  tc->cchTextMax = CELL_TEXT_MAX;);
     ok = remote_text(hwnd, r, TCM_GETITEMW, item, header, text);
     SetRectEmpty(&rect);
     obj->has_extents = FALSE;
