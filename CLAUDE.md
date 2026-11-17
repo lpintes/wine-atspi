@@ -687,6 +687,23 @@ XTest keys, Wine 11.21, 2026-11-09).
   change fixes it (automatic test and Orca by hand). Reported as
   mate-desktop/marco#847, fix in PR #848 (2026-11-09); related #703.
 
+Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
+2026-11-17).
+
+- A main window shown with `SW_SHOWNA` and a `MessageBoxW` it owns
+  opened right away: in WSLg the box loses the activation to its
+  disabled owner and gets no keys (0 of 5 runs work, with or without
+  the bridge). The explorer desktop thread's `set_foreground_window`
+  posts `WM_WINE_SETACTIVEWINDOW` to the app thread; the box's modal
+  loop delivers it late and `win32u/message.c` activates the owner
+  without checking that it is disabled now. `SW_SHOW`, or the box 1 s
+  later, works. In the Arch image under MATE and GNOME 5 of 5 runs
+  work. Not a bridge bug. A report for WineHQ is drafted in
+  `build/exp-race/wine-bug-report.md` (untracked), not submitted yet
+  (2026-11-17). Fixed on the
+  application side in walk (`FormBase.SetVisible` shows an enabled
+  top-level form with `SW_SHOW` the first time, lpintes/walk 6e4e3fa).
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
@@ -773,6 +790,14 @@ XTest keys, Wine 11.21, 2026-11-09).
     `run-gnome` or `run-mate`.
   - In WSL the image can be mounted at `/mnt/arch`. Never write to it while
     QEMU runs.
+  - Into the image itself (QEMU off, so the files survive `-snapshot`)
+    copy with `build/copy-to-image.sh` (untracked helper: loop-mounts
+    the image at `/mnt/arch`, copies the bridge, hook DLL, controls and
+    `bridge.sh` to `~/wine-atspi`, unmounts). Run as root from Git Bash:
+    `export MSYS_NO_PATHCONV=1; wsl.exe -d archlinux -u root -- bash
+    /mnt/c/vcs/github.com/lpintes/wine-atspi/build/copy-to-image.sh`.
+    Do not pass `$VAR` inline through `wsl.exe ... bash -c '...'`; use a
+    script file.
   - Into a running VM copy with `bash build/copy-to-vm.sh` from Git Bash
     (untracked helper; `scp` to `~/wine-atspi`). It uses the host alias
     `arch-vm` in `~/.ssh/config`: key `~/.ssh/arch-vm` without passphrase,

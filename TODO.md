@@ -29,7 +29,8 @@ Window tree (object navigation, flat review):
   hangs below the frame next to its combo box.
 - On a new top-level window the tree is posted synchronously before the
   focus (up to about 80 ms delay before speech). Each child window costs
-  about 6 ms to describe, likely MSAA in `describe_object`; not measured.
+  about 6 ms to describe, mostly cross-process messages, not MSAA
+  (measured 2026-11-16: skipping MSAA saved 190 -> 182 ms for 35 objects).
 - A focused list without a focused item is described by MSAA in the
   focus but by `describe_container` in the tree, so its name or role may
   flip on each refresh. Not seen.
@@ -69,9 +70,25 @@ Bridge:
 - While the bridge waits in `SendMessageTimeout` (up to 500 ms) its LL
   keyboard hook is not served.
 - Method calls get the node pointer from `subtree_dispatch`; a node freed
-  in between would dangle. Not seen.
+  in between would dangle. Not seen. Idea: pass `app` and look the node
+  up by path in `method_call`. Unverified assumption: today GDBus method
+  idles outrank the bridge's idle sources, which is the only protection.
+- A focused tree item walks all its siblings (`describe_treeview_item_in`
+  has no cache, `TVGN_PREVIOUS` / `TVGN_NEXT`): one message per sibling
+  on each arrow key, slow under regedit keys with thousands of subkeys.
+  Idea: remember the last parent with its count and derive the position
+  from the move. Not measured.
+- a11y bus: if it is missing at start the bridge exits for the whole
+  session (`atspi_init`); if it dies later, applications do not register
+  again.
+- Pure functions (`char_offset`, `rich_text_index`, `control_index`,
+  `text_range`, `menu_text`) could get native unit tests without Wine.
 
 ## 3. Later
+
+- Submit the Wine bug report `build/exp-race/wine-bug-report.md` to
+  https://bugs.winehq.org with `tests/msgbox-race.c` attached (see the
+  SW_SHOWNA fact in `CLAUDE.md`).
 
 - Menus in 32-bit programs: a 32-bit hook DLL and a 32-bit process that
   installs it.
