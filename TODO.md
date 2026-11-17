@@ -86,10 +86,6 @@ Bridge:
 
 ## 3. Later
 
-- Submit the Wine bug report `build/exp-race/wine-bug-report.md` to
-  https://bugs.winehq.org with `tests/msgbox-race.c` attached (see the
-  SW_SHOWNA fact in `CLAUDE.md`).
-
 - Menus in 32-bit programs: a 32-bit hook DLL and a 32-bit process that
   installs it.
 - Move key-check heuristics into the hook DLL ("Move heuristics into the

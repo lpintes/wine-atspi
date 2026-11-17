@@ -698,9 +698,9 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
   loop delivers it late and `win32u/message.c` activates the owner
   without checking that it is disabled now. `SW_SHOW`, or the box 1 s
   later, works. In the Arch image under MATE and GNOME 5 of 5 runs
-  work. Not a bridge bug. A report for WineHQ is drafted in
-  `build/exp-race/wine-bug-report.md` (untracked), not submitted yet
-  (2026-11-17). Fixed on the
+  work. Not a bridge bug. Reported as WineHQ bug 60809
+  (https://bugs.winehq.org/show_bug.cgi?id=60809, 2026-11-17, with
+  `tests/msgbox-race.c` attached). Fixed on the
   application side in walk (`FormBase.SetVisible` shows an enabled
   top-level form with `SW_SHOW` the first time, lpintes/walk 6e4e3fa).
 
