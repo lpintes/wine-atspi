@@ -11,7 +11,7 @@ WIN32_FLAGS = -mno-cygwin -mconsole
 export WINEPREFIX
 
 all: $(BUILD)/probe.exe.so $(BUILD)/sendkeys.exe.so $(BUILD)/controls.exe.so \
-	$(BUILD)/wine-atspi.exe.so $(BUILD)/wine-atspi-hook.dll
+	$(BUILD)/msgbox-race.exe.so $(BUILD)/wine-atspi.exe.so $(BUILD)/wine-atspi-hook.dll
 
 $(BUILD):
 	mkdir -p $@
@@ -52,6 +52,9 @@ $(BUILD)/sendkeys.exe.so: tools/sendkeys.c | $(BUILD)
 
 $(BUILD)/controls.exe.so: tests/controls.c | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/controls.exe $< -lcomctl32
+
+$(BUILD)/msgbox-race.exe.so: tests/msgbox-race.c | $(BUILD)
+	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/msgbox-race.exe $< -lshell32
 
 prefix:
 	test -d $(WINEPREFIX) || wineboot -i
