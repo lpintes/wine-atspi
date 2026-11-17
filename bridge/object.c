@@ -413,6 +413,12 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         obj->role = role_from_class(hwnd, cls);
         refine_class_states(hwnd, obj);
     }
+    /*
+     * A top-level window focused itself (walk's main window while its
+     * modal box is up) is the frame node; keep the frame's role for it.
+     */
+    if (obj->role == BRIDGE_ROLE_UNKNOWN && !obj->child && GetAncestor(hwnd, GA_ROOT) == hwnd)
+        obj->role = !lstrcmpW(cls, L"#32770") ? BRIDGE_ROLE_DIALOG : BRIDGE_ROLE_FRAME;
     if (obj->role == BRIDGE_ROLE_UNKNOWN)
         obj->role = BRIDGE_ROLE_PANEL;
     if (obj->role == BRIDGE_ROLE_TEXT)
