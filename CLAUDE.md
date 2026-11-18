@@ -623,7 +623,12 @@ Found with the bridge and Wine's winefile (`build/exp-winefile.sh`,
   `tests/bridge-winefile.sh`: Return expanded the current folder while
   the caret was on item 0); a winefile quirk.
 - A large folder (`Z:\lib64`, 4000 files) keeps winefile busy for
-  seconds; the key check then gives up on the busy list.
+  seconds; the key check then gives up on the busy list. The bridge is
+  not the cause: winefile started in `/usr/bin` (3442 files) answers
+  after about 6 s without a bridge, with an idle one and with all hooks
+  installed alike (`tests/perf-winefile.sh` in the VM, 3 runs each,
+  spread 5-6.6 s without, 5.9-6.4 s with; 2026-11-18). The global
+  `WH_CALLWNDPROC` hook needs no narrowing for this.
 
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).

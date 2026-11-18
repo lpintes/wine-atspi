@@ -7,6 +7,8 @@
  * Usage: sendkeys STEP...
  *   w:MS        wait MS milliseconds
  *   f:CLASS     bring the first top-level window of CLASS to the foreground
+ *   r:CLASS     wait until a window of CLASS answers messages and print the
+ *               milliseconds since sendkeys started (stderr)
  *   t:TEXT      type TEXT as Unicode characters
  *   k:KEYS      press a key combination, e.g. k:down, k:alt+f, k:ctrl+shift+end
  *
@@ -163,15 +165,41 @@ static int focus_class(const WCHAR *cls)
     return 1;
 }
 
+/* Waits until a top-level window of the class exists and its thread
+ * answers a message (60 s at most), then reports the time since start.
+ * The window can exist long before: winefile creates its frame and then
+ * reads the start folder before it runs its message loop. */
+static int wait_ready(const WCHAR *cls, DWORD start)
+{
+    DWORD_PTR result;
+
+    while (GetTickCount() - start < 60000)
+    {
+        HWND hwnd = FindWindowW(cls, NULL);
+
+        if (hwnd && SendMessageTimeoutW(hwnd, WM_NULL, 0, 0, SMTO_NORMAL,
+                                        100, &result))
+        {
+            error(L"%s ready after %u ms", cls, (unsigned)(GetTickCount() - start));
+            return 1;
+        }
+        if (!hwnd)
+            Sleep(10);
+    }
+    error(L"no answer from a window of class \"%s\"", cls);
+    return 0;
+}
+
 /* wmain is not used: its argv is broken when msvcrt and ucrtbase get mixed. */
 int main(void)
 {
     int argc, i, ok;
     WCHAR **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    DWORD start = GetTickCount();
 
     if (!argv || argc < 2)
     {
-        error(L"usage: sendkeys w:MS | f:CLASS | t:TEXT | k:KEYS ...");
+        error(L"usage: sendkeys w:MS | f:CLASS | r:CLASS | t:TEXT | k:KEYS ...");
         return 2;
     }
     for (i = 1; i < argc; i++)
@@ -187,6 +215,8 @@ int main(void)
         }
         else if (arg[0] == L'f')
             ok = focus_class(arg + 2);
+        else if (arg[0] == L'r')
+            ok = wait_ready(arg + 2, start);
         else if (arg[0] == L't')
             ok = type_text(arg + 2);
         else if (arg[0] == L'k')
