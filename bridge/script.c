@@ -47,7 +47,12 @@
  *   wa.log(...)          writes to the trace when WINE_ATSPI_DEBUG is set
  *
  * print also goes to the trace. Errors of a script go to stderr or the
- * --log file always. A call that runs too long is stopped with an error.
+ * --log file always, each distinct message once until the script is
+ * read again. A call that runs too long is stopped with an error.
+ *
+ * The bridge looks at the script's file at most once a second while it
+ * describes objects of that program; a changed, new or removed file
+ * replaces the Lua state, so whatever the script kept is lost.
  *
  * bridge/luauser.h replaces va_list in this file (see there), so nothing
  * here may pass a va_list to Win32.
@@ -66,11 +71,21 @@
 #define SCRIPT_STEPS 10000000
 /* Largest block wa.readMemory reads. */
 #define READ_MAX 65536
+/* How often the script's file is looked at for a change. */
+#define RELOAD_CHECK_MS 1000
+/* Distinct error messages remembered per script. */
+#define MAX_ERRORS 64
 
 struct script
 {
     char app[MAX_PATH * 3];
     lua_State *L;           /* NULL: the executable has no script */
+    BOOL checked;           /* the file was looked at once */
+    DWORD checked_at;       /* GetTickCount of the last look */
+    FILETIME written;       /* of the file read; 0 if there was none */
+    DWORD size;
+    UINT errors[MAX_ERRORS]; /* hashes of the messages reported */
+    int error_count;
 };
 
 static struct script scripts[MAX_SCRIPTS];
@@ -183,13 +198,47 @@ static void write_line(const char *a, const char *b, const char *c)
     WriteFile(trace_handle, "\n", 1, &written, NULL);
 }
 
-/* Reports the error on top of the stack and pops it. */
-static void report_error(lua_State *L, const char *app)
+/* FNV-1a of a string. */
+static UINT hash_string(const char *s)
+{
+    UINT h = 2166136261u;
+
+    while (*s)
+        h = (h ^ (BYTE)*s++) * 16777619u;
+    return h;
+}
+
+/*
+ * Reports the error on top of the stack, unless s reported the same
+ * message before, and pops it.
+ */
+static void report_error(lua_State *L, struct script *s)
 {
     const char *msg = lua_tostring(L, -1);
+    UINT h;
+    int i;
 
-    write_line("wine-atspi: script ", app, "");
-    write_line("  ", msg ? msg : "(error object is not a string)", "");
+    if (!msg)
+        msg = "(error object is not a string)";
+    h = hash_string(msg);
+    for (i = 0; i < s->error_count && i < MAX_ERRORS; i++)
+        if (s->errors[i] == h)
+            break;
+    if (i == s->error_count)
+    {
+        /* error_count stops at MAX_ERRORS + 1: the list was full once. */
+        if (s->error_count < MAX_ERRORS)
+        {
+            write_line("wine-atspi: script ", s->app, "");
+            write_line("  ", msg, "");
+            s->errors[s->error_count++] = h;
+        }
+        else
+        {
+            write_line("wine-atspi: script ", s->app, ": further errors are not reported");
+            s->error_count++;
+        }
+    }
     lua_pop(L, 1);
 }
 
@@ -200,7 +249,7 @@ static void count_hook(lua_State *L, lua_Debug *ar)
 }
 
 /* lua_pcall with the step limit; on error reports it. TRUE if it worked. */
-static BOOL call(lua_State *L, int nargs, int nresults, const char *app)
+static BOOL call(lua_State *L, int nargs, int nresults, struct script *s)
 {
     int status;
 
@@ -209,7 +258,7 @@ static BOOL call(lua_State *L, int nargs, int nresults, const char *app)
     lua_sethook(L, NULL, 0, 0);
     if (status == LUA_OK)
         return TRUE;
-    report_error(L, app);
+    report_error(L, s);
     return FALSE;
 }
 
@@ -483,9 +532,42 @@ static int wa_on_describe(lua_State *L)
     return 0;
 }
 
-/* Reads the script of app into a new Lua state; NULL if there is none. */
-static lua_State *load_script(const char *app)
+/*
+ * Looks for the script file of app; TRUE with its path, time of the last
+ * write and size if there is one.
+ */
+static BOOL find_script(const char *app, WCHAR *path, FILETIME *written, DWORD *size)
 {
+    static const WCHAR *const dirs[] = { L"\\scripts\\", L"\\..\\scripts\\" };
+    WCHAR dir[MAX_PATH], name[MAX_PATH], *slash;
+    WIN32_FILE_ATTRIBUTE_DATA attr;
+    int i;
+
+    if (!MultiByteToWideChar(CP_UTF8, 0, app, -1, name, ARRAYSIZE(name)) ||
+        !GetModuleFileNameW(NULL, dir, ARRAYSIZE(dir)) || !(slash = wcsrchr(dir, '\\')))
+        return FALSE;
+    *slash = 0;
+    for (i = 0; i < ARRAYSIZE(dirs); i++)
+    {
+        lstrcpyW(path, dir);
+        lstrcatW(path, dirs[i]);
+        lstrcatW(path, name);
+        lstrcatW(path, L".lua");
+        if (GetFileAttributesExW(path, GetFileExInfoStandard, &attr) &&
+            !(attr.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            *written = attr.ftLastWriteTime;
+            *size = attr.nFileSizeLow;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/* Reads the script at path into a new Lua state for s; NULL on error. */
+static lua_State *load_script(struct script *s, const WCHAR *path)
+{
+    const char *app = s->app;
     static const luaL_Reg libs[] =
     {
         { LUA_GNAME, luaopen_base },
@@ -511,31 +593,22 @@ static lua_State *load_script(const char *app)
         { "formatFileTime", wa_format_file_time },
         { NULL, NULL },
     };
-    static const WCHAR *const dirs[] = { L"\\scripts\\", L"\\..\\scripts\\" };
-    WCHAR dir[MAX_PATH], path[MAX_PATH * 2], name[MAX_PATH], *slash;
     char chunk[MAX_PATH * 3 + 8];
-    HANDLE file = INVALID_HANDLE_VALUE;
     const luaL_Reg *lib;
     DWORD size, done = 0;
     lua_State *L;
+    HANDLE file;
     char *buf;
-    int i;
     BOOL ok;
 
-    if (!MultiByteToWideChar(CP_UTF8, 0, app, -1, name, ARRAYSIZE(name)) ||
-        !GetModuleFileNameW(NULL, dir, ARRAYSIZE(dir)) || !(slash = wcsrchr(dir, '\\')))
-        return NULL;
-    *slash = 0;
-    for (i = 0; i < ARRAYSIZE(dirs) && file == INVALID_HANDLE_VALUE; i++)
-    {
-        lstrcpyW(path, dir);
-        lstrcatW(path, dirs[i]);
-        lstrcatW(path, name);
-        lstrcatW(path, L".lua");
-        file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    }
+    /* An editor may be writing the file, so share it for writing too. */
+    file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
+    {
+        write_line("wine-atspi: cannot read the script of ", app, "");
         return NULL;
+    }
     size = GetFileSize(file, NULL);
     buf = size <= SCRIPT_MAX_BYTES ? HeapAlloc(GetProcessHeap(), 0, size + 1) : NULL;
     ok = buf && ReadFile(file, buf, size, &done, NULL) && done == size;
@@ -575,11 +648,11 @@ static lua_State *load_script(const char *app)
     lstrcatA(chunk, ".lua");
     if (luaL_loadbufferx(L, buf, size, chunk, "t") != LUA_OK)
     {
-        report_error(L, app);
+        report_error(L, s);
         ok = FALSE;
     }
     else
-        ok = call(L, 0, 0, app);
+        ok = call(L, 0, 0, s);
     HeapFree(GetProcessHeap(), 0, buf);
     if (!ok)
     {
@@ -587,6 +660,42 @@ static lua_State *load_script(const char *app)
         return NULL;
     }
     return L;
+}
+
+/*
+ * Reads the script of s on the first call and again when its file has
+ * changed, appeared or gone; looks at the file at most every
+ * RELOAD_CHECK_MS.
+ */
+static void refresh_script(struct script *s)
+{
+    WCHAR path[MAX_PATH * 2];
+    FILETIME written = { 0, 0 };
+    DWORD size = 0, now = GetTickCount();
+    BOOL found;
+
+    if (s->checked && now - s->checked_at < RELOAD_CHECK_MS)
+        return;
+    found = find_script(s->app, path, &written, &size);
+    if (s->checked)
+    {
+        s->checked_at = now;
+        if (!CompareFileTime(&written, &s->written) && size == s->size)
+            return;
+        write_line("wine-atspi: script ", s->app, found ? ": file changed, reading it again"
+                                                        : ": file removed");
+    }
+    if (s->L)
+        lua_close(s->L);
+    s->L = NULL;
+    s->error_count = 0;
+    s->written = written;
+    s->size = size;
+    if (found)
+        s->L = load_script(s, path);
+    /* Loading may take long; count the interval from its end. */
+    s->checked = TRUE;
+    s->checked_at = GetTickCount();
 }
 
 /* The script of the process that owns hwnd; NULL if it has none. */
@@ -599,24 +708,27 @@ static struct script *script_of(HWND hwnd)
 
     if (!GetWindowThreadProcessId(hwnd, &pid))
         return NULL;
-    for (i = 0; i < MAX_PIDS; i++)
+    for (i = 0; i < MAX_PIDS && !s; i++)
         if (pids[i].pid == pid)
-            return pids[i].script->L ? pids[i].script : NULL;
-    get_app_name(pid, app, sizeof(app));
-    for (i = 0; i < script_count && !s; i++)
-        if (!lstrcmpiA(scripts[i].app, app))
-            s = &scripts[i];
+            s = pids[i].script;
     if (!s)
     {
-        if (script_count == MAX_SCRIPTS)
-            return NULL;
-        s = &scripts[script_count++];
-        lstrcpynA(s->app, app, sizeof(s->app));
-        s->L = load_script(app);
+        get_app_name(pid, app, sizeof(app));
+        for (i = 0; i < script_count && !s; i++)
+            if (!lstrcmpiA(scripts[i].app, app))
+                s = &scripts[i];
+        if (!s)
+        {
+            if (script_count == MAX_SCRIPTS)
+                return NULL;
+            s = &scripts[script_count++];
+            lstrcpynA(s->app, app, sizeof(s->app));
+        }
+        pids[pid_next].pid = pid;
+        pids[pid_next].script = s;
+        pid_next = (pid_next + 1) % MAX_PIDS;
     }
-    pids[pid_next].pid = pid;
-    pids[pid_next].script = s;
-    pid_next = (pid_next + 1) % MAX_PIDS;
+    refresh_script(s);
     return s->L ? s : NULL;
 }
 
@@ -799,7 +911,7 @@ void script_describe(struct bridge_object *obj, struct focus_strings *str)
     {
         lua_rawgeti(L, -2, i);
         lua_pushvalue(L, -2);
-        call(L, 1, 0, s->app);
+        call(L, 1, 0, s);
     }
     pull_object(L, obj, str);
     lua_pop(L, 2);

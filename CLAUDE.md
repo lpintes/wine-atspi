@@ -873,6 +873,11 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
     `arch-vm` in `~/.ssh/config`: key `~/.ssh/arch-vm` without passphrase,
     installed in the image. The main `id_rsa` has a passphrase and no agent
     runs, so it cannot be used from here.
+  - For a manual test with Orca in the running VM, `bash build/vm-orca.sh
+    PROGRAM` from Git Bash (untracked helper) takes the MATE session's
+    environment from `/proc`, starts Orca if it does not run, then
+    `bridge.sh PROGRAM`; the trace is `~/wine-atspi/build/bridge.log` in
+    the VM.
   - Never overwrite a running bridge's `.so` in place: the bridge crashes
     and stays a zombie that keeps the `WineAtspiBridge` mutex, so every
     new bridge exits and programs run without it (seen 2026-11-10;
