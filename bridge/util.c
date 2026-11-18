@@ -153,24 +153,6 @@ void get_class(HWND hwnd, WCHAR *cls, int len, char *dst, int size)
     to_utf8(cls, dst, size);
 }
 
-/* Drops the "&" that marks a mnemonic; "&&" stays as one "&". */
-void strip_ampersands(WCHAR *buf)
-{
-    int i, j;
-
-    for (i = j = 0; buf[i]; i++)
-    {
-        if (buf[i] == '&')
-        {
-            if (buf[i + 1] != '&')
-                continue;
-            i++;
-        }
-        buf[j++] = buf[i];
-    }
-    buf[j] = 0;
-}
-
 /* Drops the "&" of the mnemonic from the text buf of Static hwnd. */
 void strip_mnemonic(HWND hwnd, WCHAR *buf)
 {

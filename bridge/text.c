@@ -8,39 +8,6 @@
 #define TEXT_MAX_CHARS (1 << 20)
 
 /*
- * Character offset of UTF-16 position pos in text as the AT-SPI side sees
- * it: surrogate pairs count once and the "\r" of "\r\n" is dropped.
- */
-int char_offset(const WCHAR *text, int len, int pos)
-{
-    int i, offset = 0;
-
-    for (i = 0; i < pos && i < len; i++)
-    {
-        if (IS_LOW_SURROGATE(text[i]) && i > 0 && IS_HIGH_SURROGATE(text[i - 1]))
-            continue;
-        if (text[i] == '\r' && i + 1 < len && text[i + 1] == '\n')
-            continue;
-        offset++;
-    }
-    return offset;
-}
-
-/*
- * A RichEdit (2.0 and later) ends a paragraph with one "\r" inside, so its
- * EM_GETSEL counts the "\r\n" that WM_GETTEXT gives as one character
- * (riched20/editor.c). Turn such a position into an index into text.
- */
-static int rich_text_index(const WCHAR *text, int len, int pos)
-{
-    int i = 0;
-
-    for (; pos > 0 && i < len; pos--)
-        i += text[i] == '\r' && i + 1 < len && text[i + 1] == '\n' ? 2 : 1;
-    return i;
-}
-
-/*
  * EM_GETSEL orders start and end, so it does not tell at which end the
  * caret is. Compare the caret rectangle with the position of the start.
  */
@@ -117,20 +84,6 @@ BOOL has_edit_text(const WCHAR *cls)
 
 /* Lines below the first visible one whose packed EM_POSFROMCHAR y is sure not to wrap. */
 #define TEXT_SAFE_LINES 1000
-
-/*
- * Index into the text of an Edit (rich FALSE) or RichEdit of AT-SPI
- * offset in chars: astral code points take two UTF-16 units, and "\n" was
- * "\r\n" in an Edit but one "\r" in a RichEdit (see rich_text_index).
- */
-static int control_index(const unsigned int *chars, int count, int offset, BOOL rich)
-{
-    int i, index = 0;
-
-    for (i = 0; i < offset && i < count; i++)
-        index += (chars[i] > 0xffff ? 2 : 1) + (!rich && chars[i] == '\n');
-    return index;
-}
 
 /* Client position of the character at index; FALSE past the end of the text. */
 static BOOL text_pos(HWND hwnd, int index, POINT *pt)

@@ -8,6 +8,8 @@
  * (text.c, range.c, labels.c, listview.c, listbox.c, treeview.c, tab.c,
  * toolbar.c, console.c, statusbar.c), wintree.c (the window tree),
  * events.c (WinEvents, focus, key check), menu.c, keys.c and main.c.
+ * utf16.c holds pure text helpers without Windows API (utf16.h), which
+ * tests/unit.c checks natively.
  */
 #ifndef WINE_ATSPI_CORE_H
 #define WINE_ATSPI_CORE_H
@@ -24,6 +26,7 @@
 
 #include "bridge.h"
 #include "menuhook.h"
+#include "utf16.h"
 
 #define NAME_MAX_UTF8 1024
 /* Columns of a list view in report view beyond this are left out. */
@@ -225,7 +228,6 @@ BOOL is_busy(HWND hwnd);
 void get_window_text(HWND hwnd, char *dst, int size);
 void get_app_name(DWORD pid, char *dst, int size);
 void get_class(HWND hwnd, WCHAR *cls, int len, char *dst, int size);
-void strip_ampersands(WCHAR *buf);
 void strip_mnemonic(HWND hwnd, WCHAR *buf);
 BOOL remote_open(HWND hwnd, struct remote *r);
 void remote_close(struct remote *r);
@@ -249,7 +251,6 @@ HWND find_updown(HWND hwnd);
 void describe_range(HWND hwnd, const WCHAR *cls, struct bridge_object *obj);
 
 /* text.c */
-int char_offset(const WCHAR *text, int len, int pos);
 void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
                         struct focus_strings *str);
 BOOL has_edit_text(const WCHAR *cls);

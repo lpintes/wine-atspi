@@ -77,8 +77,6 @@ Bridge:
 - a11y bus: if it is missing at start the bridge exits for the whole
   session (`atspi_init`); if it dies later, applications do not register
   again.
-- Pure functions (`char_offset`, `rich_text_index`, `control_index`,
-  `text_range`, `menu_text`) could get native unit tests without Wine.
 
 ## 3. Later
 

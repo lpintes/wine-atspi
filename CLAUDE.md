@@ -59,7 +59,10 @@ the same way NVDA does.
   `struct item_handler` in its file, found by class with
   `find_item_handler` (`object.c`); focus, key check and window tree go
   through it. The AT-SPI side is `bridge/atspi.c`, the interface
-  between the two `bridge/bridge.h`.
+  between the two `bridge/bridge.h`. Pure helpers without Windows API
+  or D-Bus live in `bridge/utf16.c` (core: text offsets, mnemonics,
+  menu text) and `bridge/textrange.c` (AT-SPI side: word and line
+  ranges), so `tests/unit.c` checks them natively.
 - **One AT-SPI application per Wine process**, each with its own D-Bus
   connection. Orca keeps per-application settings and scripts and announces
   application switches, so lumping all Wine programs into one application
@@ -790,6 +793,10 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
   `wine-atspi.exe`. The source lives on the Windows side at
   `C:\vcs\github.com\lpintes\wine-atspi` (`/mnt/c/vcs/github.com/lpintes/wine-atspi`
   in WSL).
+- **Unit tests** of the pure helpers (`bridge/utf16.c` in the core,
+  `bridge/textrange.c` on the AT-SPI side) build natively with the host
+  gcc, no Wine and no window: `make check` in WSL (`tests/unit.c`).
+  Code that needs no Windows API or D-Bus goes into such files.
 - **Quick tests in WSL** (Wine runs through WSLg). Verify automatically:
   a `python-atspi` script dumps the AT-SPI tree and events and compares them
   with expectations. Do not ask the user to listen to every iteration.

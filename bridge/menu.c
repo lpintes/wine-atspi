@@ -39,13 +39,7 @@ static void menu_text(const WCHAR *raw, char *name, int name_size,
     WCHAR buf[MENU_TEXT_MAX], *tab;
 
     lstrcpynW(buf, raw, ARRAYSIZE(buf));
-    for (tab = buf; *tab && *tab != '\t'; tab++)
-        ;
-    if (*tab)
-        *tab++ = 0;
-    else
-        tab = NULL;
-    strip_ampersands(buf);
+    tab = split_menu_text(buf);
     to_utf8(buf, name, name_size);
     if (shortcut)
         to_utf8(tab, shortcut, shortcut_size);

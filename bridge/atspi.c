@@ -18,6 +18,7 @@
 #include <gio/gio.h>
 
 #include "bridge.h"
+#include "textrange.h"
 
 #define ATSPI_PREFIX "/org/a11y/atspi/accessible"
 #define ATSPI_ROOT_PATH ATSPI_PREFIX "/root"
@@ -396,9 +397,6 @@ enum { COORD_SCREEN, COORD_WINDOW, COORD_PARENT };
 /* AtspiComponentLayer */
 enum { LAYER_WIDGET = 3, LAYER_WINDOW = 7 };
 
-/* AtspiTextGranularity */
-enum { GRANULARITY_CHAR, GRANULARITY_WORD, GRANULARITY_SENTENCE, GRANULARITY_LINE,
-       GRANULARITY_PARAGRAPH };
 /* AtspiTextBoundaryType */
 enum { BOUNDARY_CHAR, BOUNDARY_WORD_START, BOUNDARY_WORD_END, BOUNDARY_SENTENCE_START,
        BOUNDARY_SENTENCE_END, BOUNDARY_LINE_START, BOUNDARY_LINE_END };
@@ -597,49 +595,10 @@ static char *text_slice(struct node *node, gint start, gint end)
     return g_ucs4_to_utf8(node->chars + start, end - start, NULL, NULL, NULL);
 }
 
-static gboolean is_word_char(gunichar c)
+static void node_text_range(struct node *node, gint offset, guint granularity,
+                            gint *start, gint *end)
 {
-    return g_unichar_isalnum(c) || g_unichar_ismark(c);
-}
-
-/*
- * Range [*start, *end) of the unit of granularity at offset, with the ATK
- * meaning: a word runs to the start of the next word, a line includes its
- * "\n". At the end of text ending in "\n" the line is empty. Sentences
- * and paragraphs are logical lines for now.
- */
-static void text_range(struct node *node, gint offset, guint granularity,
-                       gint *start, gint *end)
-{
-    const gunichar *c = node->chars;
-    gint n = node->count, i;
-
-    offset = CLAMP(offset, 0, n);
-    switch (granularity)
-    {
-    case GRANULARITY_CHAR:
-        *start = offset;
-        *end = MIN(offset + 1, n);
-        return;
-    case GRANULARITY_WORD:
-        for (i = offset; i > 0; i--)
-            if (i < n && is_word_char(c[i]) && !is_word_char(c[i - 1]))
-                break;
-        *start = i;
-        for (i = offset + 1; i < n; i++)
-            if (is_word_char(c[i]) && !is_word_char(c[i - 1]))
-                break;
-        *end = MIN(i, n);
-        return;
-    default:
-        for (i = offset; i > 0 && c[i - 1] != '\n'; i--)
-            ;
-        *start = i;
-        for (i = offset; i < n && c[i] != '\n'; i++)
-            ;
-        *end = MIN(i + 1, n);
-        return;
-    }
+    text_range(node->chars, node->count, offset, granularity, start, end);
 }
 
 static guint boundary_granularity(guint boundary)
@@ -661,18 +620,18 @@ static GVariant *text_near_offset(struct node *node, gint offset, guint boundary
     GVariant *ret;
     char *s;
 
-    text_range(node, offset, granularity, &start, &end);
+    node_text_range(node, offset, granularity, &start, &end);
     if (which < 0)
     {
         if (start > 0)
-            text_range(node, start - 1, granularity, &start, &end);
+            node_text_range(node, start - 1, granularity, &start, &end);
         else
             start = end = 0;
     }
     else if (which > 0)
     {
         if (end < node->count && end > start)
-            text_range(node, end, granularity, &start, &end);
+            node_text_range(node, end, granularity, &start, &end);
         else
             start = end = node->count;
     }
@@ -702,7 +661,7 @@ static GVariant *text_method(struct node *node, const char *method, GVariant *pa
         g_variant_get(params, "(iu)", &offset, &type);
         if (offset < 0 || offset > node->count)
             return g_variant_new("(sii)", "", -1, -1);
-        text_range(node, offset, type, &start, &end);
+        node_text_range(node, offset, type, &start, &end);
         s = text_slice(node, start, end);
         ret = g_variant_new("(sii)", s, start, end);
         g_free(s);
