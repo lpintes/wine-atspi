@@ -421,6 +421,20 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   Where Am I. Wine's tree view selects its first item on `WM_SETFOCUS`,
   so focus goes straight to an item. Decided (2026-11-07): left as in
   GTK, no workaround in the bridge.
+- Orca never speaks checked for a `tree item`: `_generate_tree_item`
+  has no checked state, unlike `_generate_list_item`
+  (`_generate_state_checked_if_checkable`) and a table cell with a
+  "toggle" action. `state-changed:checked` on the focused tree item
+  passes `is_presentable_checked_change` but presents the tree item
+  again, without the state. A `TVS_CHECKBOXES` tree keeps the box in
+  the state image (`TVIS_STATEIMAGEMASK`: 1 unchecked, 2 checked, 0
+  none); Space and a click cycle it without a WinEvent
+  (`TREEVIEW_ToggleItemState`), and Wine sets every item to 1 when it
+  makes the box images: at `WM_STYLECHANGED`, or on the first paint for
+  the style given at creation (`TREEVIEW_Paint`). The bridge gives the
+  item `checkable` and `checked`, as NVDA, Firefox and Chromium expose
+  such an item; decided (2026-11-18): no workaround for Orca
+  (`tests/bridge-controls.sh`, "Places").
 - For a focused page tab Orca says name and role only ("General
   karta"): `_generate_ancestors` returns nothing when the new focus is a
   page tab, so the page tab list and its label are never spoken, as in

@@ -32,9 +32,11 @@ sleep 2
 # Down must focus cell 'readme.txt' 0,0 with row ['readme.txt', '2 KB',
 # 'Text'] and headers ['Name', 'Size', 'Type'], Down then 'notes.md'.
 # Tab to "Places:" (tree): Wine selects the first item, so focus on tree
-# item 'Home' 1/3 level=1 collapsed in tree 'Places:'; Right expands it
-# (state-changed:expanded), Down 'Documents' 1/2 level=2, Down 'Music'
-# 2/2, Left back to 'Home', Left collapses it, Down 'Work' 2/3.
+# item 'Home' 1/3 level=1 collapsed in tree 'Places:', checkable, not
+# checked; Right expands it (state-changed:expanded), Down 'Documents' 1/2
+# level=2, Down 'Music' 2/2 checkable checked, Space unchecks it
+# (state-changed:checked 0), Space checks it again (checked 1), Left back
+# to 'Home', Left collapses it, Down 'Work' 2/3.
 # Tab to "Sections:" (tabs): page tab 'General' 1/3 selected in page tab
 # list 'Sections:'; Right 'Advanced' 2/3, Right 'About' 3/3, Left
 # 'Advanced' again, each selected.
@@ -59,6 +61,7 @@ timeout 50 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:tab w:500 k:down w:500 k:shift+down w:500 \
     k:tab w:500 k:down w:500 k:down w:500 \
     k:tab w:500 k:right w:500 k:down w:500 k:down w:500 \
+    k:space w:500 k:space w:500 \
     k:left w:500 k:left w:500 k:down w:500 \
     k:tab w:500 k:right w:500 k:right w:500 k:left w:500 \
     k:tab w:500 k:right w:500 k:pgup w:500 k:end w:500 \

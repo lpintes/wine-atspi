@@ -250,7 +250,7 @@ static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM ite
     REMOTE_STRUCT(r, header, TVITEMW, struct tvitem32, tv,
                   tv->mask = TVIF_HANDLE | TVIF_TEXT | TVIF_STATE | TVIF_CHILDREN;
                   REMOTE_PTR(tv->hItem, item);
-                  tv->stateMask = TVIS_SELECTED | TVIS_EXPANDED;
+                  tv->stateMask = TVIS_SELECTED | TVIS_EXPANDED | TVIS_STATEIMAGEMASK;
                   REMOTE_PTR(tv->pszText, REMOTE_TEXT(r));
                   tv->cchTextMax = CELL_TEXT_MAX;);
     ok = remote_text(hwnd, r, TVM_GETITEMW, 0, header, text) &&
@@ -282,6 +282,20 @@ static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM ite
                   BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
     if (state & TVIS_SELECTED)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    /*
+     * With TVS_CHECKBOXES the state image is the box: 1 unchecked, 2
+     * checked, 0 none; Space and a click cycle it without a WinEvent
+     * (comctl32/treeview.c, TREEVIEW_ToggleItemState), the key check reads
+     * it again. Orca 51.1 speaks checked for a list item but not for a
+     * tree item (_generate_tree_item); NVDA, Firefox and Chromium expose a
+     * checkable tree item so, and so does the bridge.
+     */
+    if ((GetWindowLongW(hwnd, GWL_STYLE) & TVS_CHECKBOXES) && (state & TVIS_STATEIMAGEMASK))
+    {
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_CHECKABLE);
+        if ((state & TVIS_STATEIMAGEMASK) == INDEXTOSTATEIMAGEMASK(2))
+            obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_CHECKED);
+    }
     /* cChildren may be a callback (I_CHILDRENCALLBACK), or 0 with children. */
     if (children || tree_next(hwnd, TVGN_CHILD, item))
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_EXPANDABLE) |

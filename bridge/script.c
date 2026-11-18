@@ -162,6 +162,7 @@ static const struct
 state_names[] =
 {
     { BRIDGE_STATE_ACTIVE, "active" },
+    { BRIDGE_STATE_CHECKABLE, "checkable" },
     { BRIDGE_STATE_CHECKED, "checked" },
     { BRIDGE_STATE_COLLAPSED, "collapsed" },
     { BRIDGE_STATE_EDITABLE, "editable" },

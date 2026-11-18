@@ -12,8 +12,8 @@
  *   "Files:"   SysListView32 in report view, columns Name, Size, Type,
  *              rows readme.txt / notes.md / src / tests / docs / LICENSE /
  *              Makefile / todo.txt, more than it shows
- *   "Places:"  SysTreeView32, collapsed: Home (Documents, Music),
- *              Work (Reports), Trash
+ *   "Places:"  SysTreeView32 with check boxes, collapsed: Home
+ *              (Documents, Music checked), Work (Reports), Trash
  *   "Sections:" SysTabControl32: General, Advanced, About
  *   "Volume:"  msctls_trackbar32, 0 to 100 at 50, page size 10
  *   "Level:"   msctls_progress32, 0 to 100, follows "Volume:"; no tab stop
@@ -122,6 +122,7 @@ static HTREEITEM add_place(HWND tree, HTREEITEM parent, const WCHAR *text)
 
 static void add_places(HWND parent, int y)
 {
+    TVITEMW check = { 0 };
     HWND tree;
     HTREEITEM item;
 
@@ -130,9 +131,21 @@ static void add_places(HWND parent, int y)
                        WS_TABSTOP | WS_BORDER | TVS_HASBUTTONS | TVS_HASLINES |
                        TVS_LINESATROOT | TVS_SHOWSELALWAYS,
                        120, y, 300, 100, ID_PLACES);
+    /*
+     * As documented for Windows, TVS_CHECKBOXES is set after creation and
+     * before the items: Wine resets every state image to 1 when it makes
+     * the check box images, on the first paint for the style given at
+     * creation (comctl32/treeview.c, TREEVIEW_Paint).
+     */
+    SetWindowLongW(tree, GWL_STYLE, GetWindowLongW(tree, GWL_STYLE) | TVS_CHECKBOXES);
     item = add_place(tree, TVI_ROOT, L"Home");
     add_place(tree, item, L"Documents");
-    add_place(tree, item, L"Music");
+    /* State image 2 is the checked box; new items get 1, unchecked. */
+    check.mask = TVIF_HANDLE | TVIF_STATE;
+    check.hItem = add_place(tree, item, L"Music");
+    check.state = INDEXTOSTATEIMAGEMASK(2);
+    check.stateMask = TVIS_STATEIMAGEMASK;
+    SendMessageW(tree, TVM_SETITEMW, 0, (LPARAM)&check);
     item = add_place(tree, TVI_ROOT, L"Work");
     add_place(tree, item, L"Reports");
     add_place(tree, TVI_ROOT, L"Trash");

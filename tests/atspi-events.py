@@ -49,6 +49,8 @@ def describe(obj):
         states = obj.get_state_set()
         if states.contains(Atspi.StateType.SELECTED):
             text += " selected"
+        if states.contains(Atspi.StateType.CHECKABLE):
+            text += " checkable"
         if states.contains(Atspi.StateType.CHECKED):
             text += " checked"
         if not states.contains(Atspi.StateType.SENSITIVE):

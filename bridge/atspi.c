@@ -565,6 +565,7 @@ static const char *state_name(guint state)
     switch (state)
     {
     case BRIDGE_STATE_ACTIVE: return "active";
+    case BRIDGE_STATE_CHECKABLE: return "checkable";
     case BRIDGE_STATE_CHECKED: return "checked";
     case BRIDGE_STATE_COLLAPSED: return "collapsed";
     case BRIDGE_STATE_EDITABLE: return "editable";
