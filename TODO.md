@@ -44,8 +44,7 @@ Controls:
   after each key, no `SetCaretOffset`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
 - Tree view: check boxes not read; removed items stay as nodes.
-- Tabs and list items: an item left behind keeps "selected"; Ctrl+Tab
-  inside a property sheet page is not followed; `TCS_BUTTONS` untested.
+- Tabs: `TCS_BUTTONS` untested.
 - 32-bit layouts (`LVITEMW`, `TVITEMW`, `TCITEMW`) untested.
 - Console: a full buffer (150 rows) shifts lines up, so the diff gives
   one huge delete + insert; wide (CJK) cells untested.

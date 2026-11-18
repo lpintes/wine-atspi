@@ -41,6 +41,18 @@ wait $events
     echo "--- winecfg, second page"
     python3 tests/atspi-dump.py -v winecfg
 } >> "$LOG" 2>&1
+# Ctrl+Tab with the focus in a control of the page (not on the tabs)
+# turns the page too (PROPSHEET_IsDialogMessage): 'Libraries' loses
+# selected, 'Graphics' gets it.
+python3 tests/atspi-events.py 5 > $BUILD/propsheet-events.log 2>&1 &
+events=$!
+sleep 1
+timeout 10 wine $BUILD/sendkeys.exe.so f:#32770 w:500 k:ctrl+tab w:3000
+wait $events
+{
+    echo "--- events of Ctrl+Tab"
+    cat $BUILD/propsheet-events.log
+} >> "$LOG" 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so k:escape w:1000
 
 kill $bridge

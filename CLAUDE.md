@@ -837,7 +837,9 @@ Found with changing texts and winecfg (`tests/bridge-controls.sh`,
   (`NVDAObject.event_nameChange`). Left so.
 - winecfg is a property sheet: each page is a child `#32770`, a panel
   in the tree, and Ctrl+Page Down hides one page and shows the next
-  without a new top-level window. Labels sent with a focus went below
+  without a new top-level window. Ctrl+Tab from any control of a page
+  does the same (`PROPSHEET_IsDialogMessage`); the page show / hide
+  refreshes the tree and moves the tabs' selected state. Labels sent with a focus went below
   the frame until the next tree moved them into the page, so the focus
   carries labels only when it enters a new top-level window; in a known
   one the tree places them (`on_focus`).
