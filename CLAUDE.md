@@ -843,7 +843,7 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
     QEMU runs.
   - Into the image itself (QEMU off, so the files survive `-snapshot`)
     copy with `build/copy-to-image.sh` (untracked helper: loop-mounts
-    the image at `/mnt/arch`, copies the bridge, hook DLL, controls and
+    the image at `/mnt/arch`, copies the bridge, hook DLL, controls, `scripts/` and
     `bridge.sh` to `~/wine-atspi`, unmounts). Run as root from Git Bash:
     `export MSYS_NO_PATHCONV=1; wsl.exe -d archlinux -u root -- bash
     /mnt/c/vcs/github.com/lpintes/wine-atspi/build/copy-to-image.sh`.
