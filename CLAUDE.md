@@ -278,7 +278,12 @@ at-spi2-core 2.62.1, Orca 51.1, 2026-11-16).
   drops every application (`start_watching`, `stop_watching` in
   `main.c`).
 - Tests that only dump the tree have no listener, so all tests start
-  the bridge with `--always-on`. Not yet confirmed with Orca.
+  the bridge with `--always-on`.
+- Confirmed with Orca in the Arch image (MATE, 2026-11-18): with Orca
+  running, `bridge.sh notepad` speaks at once ("hooks installed");
+  `pkill -x orca` gives "hooks removed"; Orca started again (over ssh,
+  environment of `mate-session` from `/proc`) installs the hooks and
+  speaks the focused notepad without a key.
 
 ## Verified in Orca's source
 

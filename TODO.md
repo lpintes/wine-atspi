@@ -63,10 +63,6 @@ Controls:
 
 Bridge:
 
-- Confirm with Orca in the Arch image that the hooks follow Orca
-  (`tests/bridge-listeners.sh` checks it with python-atspi only): speech
-  right after Orca starts, nothing hooked after it quits.
-
 - While the bridge waits in `SendMessageTimeout` (up to 500 ms) its LL
   keyboard hook is not served.
 - Method calls get the node pointer from `subtree_dispatch`; a node freed
