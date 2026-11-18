@@ -231,6 +231,7 @@ void report_tree(HWND top, HWND control, BOOL items)
     const struct item_handler *handler;
     struct tree_build b;
     DWORD start = GetTickCount(), pid = 0;
+    ULONG sent = send_count;
     WCHAR cls[256];
     int i;
 
@@ -289,11 +290,11 @@ void report_tree(HWND top, HWND control, BOOL items)
         tree.control = (ULONG_PTR)control;
         atspi_post_tree(&tree);
         if (control)
-            trace(L"tree: %p %d items of %p in %lu ms", top, b.count, control,
-                  GetTickCount() - start);
+            trace(L"tree: %p %d items of %p in %lu ms, %lu messages", top, b.count, control,
+                  GetTickCount() - start, send_count - sent);
         else
-            trace(L"tree: %p %d objects%s in %lu ms", top, b.count, items ? L"" : L" (no items)",
-                  GetTickCount() - start);
+            trace(L"tree: %p %d objects%s in %lu ms, %lu messages", top, b.count,
+                  items ? L"" : L" (no items)", GetTickCount() - start, send_count - sent);
         for (i = 0; i < b.count; i++)
             free_kept_strings(&b.objects[i]);
     }

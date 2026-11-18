@@ -7,6 +7,8 @@
 BOOL debug;
 /* Where trace() writes: stderr, or the file given with --log. */
 HANDLE trace_handle;
+/* Messages sent by send_message, for the cost of a focus in the trace. */
+ULONG send_count;
 
 /* Writes a line to stderr (or the log file) when debugging is on. */
 void WINAPIV trace(const WCHAR *format, ...)
@@ -91,6 +93,7 @@ BOOL send_message(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT timeou
         SetLastError(ERROR_TIMEOUT);
         return FALSE;
     }
+    send_count++;
     if (SendMessageTimeoutW(hwnd, msg, wparam, lparam, SMTO_ABORTIFHUNG, timeout,
                             result ? result : &ignored))
         return TRUE;

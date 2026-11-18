@@ -221,6 +221,7 @@ extern BOOL debug;
 extern HANDLE trace_handle;
 void WINAPIV trace(const WCHAR *format, ...);
 void print_line(const WCHAR *text);
+extern ULONG send_count;
 void free_strings(struct focus_strings *str);
 void to_utf8(const WCHAR *src, char *dst, int size);
 BOOL send_message(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, UINT timeout,

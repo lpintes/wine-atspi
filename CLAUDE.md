@@ -630,6 +630,18 @@ Found with the bridge and Wine's winefile (`build/exp-winefile.sh`,
   spread 5-6.6 s without, 5.9-6.4 s with; 2026-11-18). The global
   `WH_CALLWNDPROC` hook needs no narrowing for this.
 
+Found with regedit's tree (`tests/perf-tree.sh` in the VM, 2026-11-18).
+
+- A cross-process message costs about 0.75 ms. Walking all 319 subkeys
+  of `HKEY_CLASSES_ROOT` for the place of the focused item took 327
+  messages and 250 ms per arrow key, the tree of its visible items 451
+  messages and 410 ms. The bridge keeps each parent's level and number
+  of children and the positions of items described, forgotten when
+  `TVM_GETCOUNT` changes (`places` in `treeview.c`): an arrow key now
+  costs 6-7 messages and 11 ms, a tree of 28 items 122 messages and
+  90-150 ms, Page Down at most one page of steps. The focus trace shows
+  the messages, time and place of each focus.
+
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).
 

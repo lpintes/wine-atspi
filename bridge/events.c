@@ -138,7 +138,8 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     struct bridge_focus focus;
     struct focus_strings str;
     HWND top = GetAncestor(hwnd, GA_ROOT);
-    DWORD pid = 0;
+    DWORD pid = 0, start = GetTickCount();
+    ULONG sent = send_count;
 
     if (is_stale_focus(hwnd, id_object, id_child))
         return;
@@ -177,7 +178,9 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
         tree_timer = SetTimer(NULL, tree_timer, 0, refresh_tree);
     }
     atspi_post_focus(&focus);
-    trace(L"focus:%p %ld %ld name \"%S\"", hwnd, id_object, id_child, focus.object.name);
+    trace(L"focus:%p %ld %ld name \"%S\" %d of %d level %d (%lu messages, %lu ms)", hwnd,
+          id_object, id_child, focus.object.name, focus.object.position, focus.object.set_size,
+          focus.object.level, send_count - sent, GetTickCount() - start);
     free_strings(&str);
     report_status_bar(top);
 

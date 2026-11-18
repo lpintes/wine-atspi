@@ -66,11 +66,6 @@ Bridge:
   in between would dangle. Not seen. Idea: pass `app` and look the node
   up by path in `method_call`. Unverified assumption: today GDBus method
   idles outrank the bridge's idle sources, which is the only protection.
-- A focused tree item walks all its siblings (`describe_treeview_item_in`
-  has no cache, `TVGN_PREVIOUS` / `TVGN_NEXT`): one message per sibling
-  on each arrow key, slow under regedit keys with thousands of subkeys.
-  Idea: remember the last parent with its count and derive the position
-  from the move. Not measured.
 - a11y bus: if it is missing at start the bridge exits for the whole
   session (`atspi_init`); if it dies later, applications do not register
   again.
