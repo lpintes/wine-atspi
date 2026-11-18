@@ -7,7 +7,8 @@
  * extents, the handler of a class), one file per control family
  * (text.c, range.c, labels.c, listview.c, listbox.c, treeview.c, tab.c,
  * toolbar.c, console.c, statusbar.c), wintree.c (the window tree),
- * events.c (WinEvents, focus, key check), menu.c, keys.c and main.c.
+ * events.c (WinEvents, focus, key check), menu.c, keys.c, script.c
+ * (application scripts in Lua) and main.c.
  * utf16.c holds pure text helpers without Windows API (utf16.h), which
  * tests/unit.c checks natively.
  */
@@ -327,5 +328,9 @@ void forget_menu(void);
 
 /* keys.c */
 LRESULT CALLBACK keyboard_proc(int code, WPARAM wparam, LPARAM lparam);
+
+/* script.c */
+void script_describe(struct bridge_object *obj, struct focus_strings *str);
+void script_forget_process(DWORD pid);
 
 #endif

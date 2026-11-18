@@ -5,12 +5,15 @@ Planned work in the order it should be done. Verified facts go to
 
 ## 1. Application scripts
 
-See "Application modules as scripts" in `CLAUDE.md` (Lua 5.4 in the
-Win32 core).
+See "Application scripts" in `CLAUDE.md` and the API in
+`bridge/script.c`.
 
-- Move the winefile fix (`winefile_entry_name`) out of the C code into
-  the first script. Then add level, expanded, size and date for its
-  panes there.
+- winefile: add level, expanded, size and date for its panes in
+  `scripts/winefile.lua`.
+- A script error is reported on every call (158 lines for one test run);
+  report each distinct error once.
+- A changed script is read only when the bridge starts; reloading it on a
+  change would help script writers.
 - Scintilla (milestone 5) comes after the scripting, so that
   program-specific parts can live in scripts.
 

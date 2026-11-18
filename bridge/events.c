@@ -83,6 +83,7 @@ void on_process_exited(DWORD pid)
         watched[i].pid = 0;
     }
     trace(L"process %lu exited", pid);
+    script_forget_process(pid);
     atspi_post_app_gone(pid);
 }
 

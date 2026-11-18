@@ -33,12 +33,12 @@ $(ATSPI_OBJS): $(BUILD)/%.o: bridge/%.c bridge/bridge.h bridge/textrange.h | $(B
 
 # Win32 core: winegcc, Windows headers only (see bridge/core.h).
 CORE = main util object range text labels listview tab toolbar listbox treeview \
-	console statusbar wintree events menu keys utf16
+	console statusbar wintree events menu keys script utf16
 CORE_OBJS = $(CORE:%=$(BUILD)/%.o)
 
 $(CORE_OBJS): $(BUILD)/%.o: bridge/%.c bridge/core.h bridge/bridge.h bridge/menuhook.h \
 		bridge/utf16.h | $(BUILD)
-	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -c -o $@ $<
+	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) $(CORE_EXTRA) -c -o $@ $<
 
 # Lua for application scripts (third_party/lua), part of the Win32 core.
 # bridge/luauser.h adapts it to Winelib without touching its files.
@@ -53,6 +53,10 @@ $(BUILD)/lua:
 
 $(LUA_OBJS): $(BUILD)/lua/%.o: third_party/lua/%.c bridge/luauser.h | $(BUILD)/lua
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) $(LUA_FLAGS) -c -o $@ $<
+
+# script.c embeds Lua.
+$(BUILD)/script.o: CORE_EXTRA = $(LUA_FLAGS)
+$(BUILD)/script.o: bridge/luauser.h third_party/lua/lua.h
 
 $(BUILD)/wine-atspi.exe.so: $(CORE_OBJS) $(LUA_OBJS) $(ATSPI_OBJS)
 	sh tests/abi-check.sh $(CORE_OBJS) $(LUA_OBJS)

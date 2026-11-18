@@ -53,7 +53,7 @@ the same way NVDA does.
   include Windows headers.
 - **Source layout:** the Win32 core is split by area into `bridge/*.c`
   (one file per control family, plus `object.c`, `wintree.c`,
-  `events.c`, `menu.c`, `keys.c`, `main.c`); what they share is in
+  `events.c`, `menu.c`, `keys.c`, `script.c`, `main.c`); what they share is in
   `bridge/core.h`, whose top comment lists the files. A control with
   items (list box, list view, tree view, tab control, toolbar) has a
   `struct item_handler` in its file, found by class with
@@ -63,6 +63,24 @@ the same way NVDA does.
   or D-Bus live in `bridge/utf16.c` (core: text offsets, mnemonics,
   menu text) and `bridge/textrange.c` (AT-SPI side: word and line
   ranges), so `tests/unit.c` checks them natively.
+- **Application scripts** (decided 2026-11-18): like NVDA's app modules,
+  fixes for one program live in `scripts/<exe>.lua`, run by Lua 5.4
+  (`third_party/lua`, built into the Win32 core) in `bridge/script.c`,
+  whose top comment is the reference of the script API. Lua is plain C,
+  so it builds with winegcc and mingw and keeps the module boundary;
+  CPython would be a large runtime with the msvcrt / libc clash.
+  Decisions:
+  - one table `wa` like SandFly's `sf` (`wa.onDescribe(fn)`,
+    `wa.sendMessage`, ...);
+  - target structures are read as bytes with `wa.readMemory` and
+    `string.unpack`, not with a C FFI (LuaJIT's FFI is 5.1-only and
+    generates calls with its own ABI assumptions);
+  - roles are AT-SPI role names, states a set of names;
+  - an onDescribe hook may change name, value, role, states, position,
+    set size and level; it is called from `describe_listbox_item` only
+    so far, other describers get it when a script needs them;
+  - hooks for events (focus, key, window) come when a script needs them;
+  - the interface grows from real cases.
 - **One AT-SPI application per Wine process**, each with its own D-Bus
   connection. Orca keeps per-application settings and scripts and announces
   application switches, so lumping all Wine programs into one application
@@ -587,9 +605,9 @@ Found with the bridge and Wine's winefile (`build/exp-winefile.sh`,
   `LB_GETTEXT` gives nothing, so Orca heard unnamed items. The item data
   is a pointer to winefile's `Entry` (three pointers, three ints, then a
   `WIN32_FIND_DATAW`); the bridge reads its `cFileName` with
-  `LB_GETITEMDATA` and `ReadProcessMemory` (`winefile_entry_name`, only in
-  `winefile.exe`). The
-  layout comes from Wine's source; re-check after Wine upgrades.
+  `LB_GETITEMDATA` and `ReadProcessMemory`, since 2026-11-18 in the
+  application script `scripts/winefile.lua` (`tests/bridge-winefile.sh`).
+  The layout comes from Wine's source; re-check after Wine upgrades.
 - A large folder (`Z:\lib64`, 4000 files) keeps winefile busy for
   seconds; the key check then gives up on the busy list.
 
@@ -750,20 +768,6 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
   Costs: a bug crashes the target, 32-bit targets need their own DLL. Keep
   the out-of-process path as fallback and for comparison with NVDA on
   Windows. The off-screen model needs the same DLL.
-- Application modules as scripts (idea, 2026-11-08). The winefile fix
-  (`winefile_entry_name`) is the first per-application code, hard-wired in
-  C. Like NVDA's app modules, such fixes could live in per-executable
-  scripts that the bridge loads by process name. Proposed language:
-  Lua 5.4, embedded in the Win32 core. It is plain C with no
-  dependencies, so it builds with both winegcc and mingw and keeps the
-  module boundary. Python is closer to NVDA, but embedding CPython in a
-  Winelib process means a large runtime and the msvcrt / libc clash.
-  First step: decide the primitives a script gets (class name, parent,
-  `SendMessage` with a timeout, `LB_GETITEMDATA`-style values, reading
-  target memory, process bitness) and the hooks it overrides (name,
-  role, states, value of an object). Wait until two or three more
-  applications need such fixes, so that the interface comes from real
-  cases.
 
 ## Winelib pitfalls
 
@@ -883,7 +887,8 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
 3. Standard controls one by one, each with a handler and an AT-SPI
    interface (`Text`, `Selection`, `Value`, ...).
 4. Menus.
-5. Application scripts (per-executable fixes, winefile first).
+5. Application scripts (per-executable fixes, winefile first). The
+   scripting itself and the winefile file names are done.
 6. Scintilla.
 7. Other popular controls; the off-screen model if a needed program
    requires it.
