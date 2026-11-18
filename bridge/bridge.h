@@ -233,7 +233,8 @@ struct bridge_key
 
 /*
  * Prepares the AT-SPI side. Call once before any other function here.
- * Returns 0 on success, non-zero if the a11y bus was not reachable.
+ * Returns 0 on success, non-zero without a session bus. The a11y bus
+ * itself may come and go; see bridge_bus_ready.
  */
 int atspi_init(void);
 
@@ -327,5 +328,13 @@ int bridge_click(unsigned long long hwnd);
  * must not block. Without a listener the Win32 side need not watch.
  */
 void bridge_set_listening(int listening);
+
+/*
+ * The AT-SPI side has (again) a connection to the a11y bus and a
+ * registry, with no application registered. Everything posted before
+ * was dropped, so the Win32 side should report the focus anew. Called
+ * on the AT-SPI thread; must not block.
+ */
+void bridge_bus_ready(void);
 
 #endif

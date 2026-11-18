@@ -318,6 +318,28 @@ at-spi2-core 2.62.1, Orca 51.1, 2026-11-16).
   environment of `mate-session` from `/proc`) installs the hooks and
   speaks the focused notepad without a key.
 
+Found with a private session bus (`tests/bridge-a11ybus.sh`,
+at-spi2-core 2.62.1, 2026-11-18).
+
+- The bridge needs only a session bus at start. It watches the name
+  `org.a11y.Bus` there (with auto-start) and asks for the address when
+  it appears (`launcher_appeared`, `connect_bus` in `atspi.c`). The
+  watch connection's `closed` signal tells that the a11y bus died, a
+  watch of `org.a11y.atspi.Registry` on it that the registry went away
+  (a new one knows no embedded application). Either loss unregisters
+  every application and says nobody listens (`drop_bus`,
+  `registry_vanished`); on the next bus or registry `bridge_bus_ready`
+  makes the main thread forget its state and report the focus again,
+  which registers the applications anew.
+- `at-spi-bus-launcher` exits when its bus daemon dies. On a desktop's
+  session bus the next `GetAddress` should start a new one by D-Bus
+  activation (`org.a11y.Bus.service`); not tested, the test's bus has
+  no service files and starts the launcher itself. Started without
+  `DISPLAY` it puts its bus at `$XDG_RUNTIME_DIR/at-spi/bus`, the
+  desktop's is `bus_0` (display :0), so a test launcher does not clash
+  with it. libatspi takes `AT_SPI_BUS_ADDRESS` before the X root window
+  property, which is how the test's dump finds the private bus.
+
 ## Verified in Orca's source
 
 Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,

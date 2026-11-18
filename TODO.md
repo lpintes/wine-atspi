@@ -58,9 +58,6 @@ Bridge:
   in between would dangle. Not seen. Idea: pass `app` and look the node
   up by path in `method_call`. Unverified assumption: today GDBus method
   idles outrank the bridge's idle sources, which is the only protection.
-- a11y bus: if it is missing at start the bridge exits for the whole
-  session (`atspi_init`); if it dies later, applications do not register
-  again.
 
 ## 3. Later
 

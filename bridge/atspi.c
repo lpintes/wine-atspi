@@ -1956,8 +1956,12 @@ static struct app *get_app(guint pid, const char *name)
 
     if (app)
         return app->conn ? app : NULL;
-    /* A window destroyed before it was described has no process. */
-    if (!pid)
+    /*
+     * A window destroyed before it was described has no process. Without
+     * an a11y bus no failure marker is kept: the process registers once
+     * the bus is back (see connect_bus).
+     */
+    if (!pid || !a11y_address)
         return NULL;
 
     app = app_new(pid);
@@ -2517,6 +2521,8 @@ static gboolean key_idle(gpointer data)
 
     if (k->pressed)
         last_keysym = k->keysym;
+    if (!a11y_address)
+        return G_SOURCE_REMOVE;
     if (!key_conn)
     {
         key_conn = g_dbus_connection_new_for_address_sync(
@@ -2579,7 +2585,8 @@ void atspi_post_app_gone(unsigned int pid)
     post(app_gone_idle, GUINT_TO_POINTER(pid), NULL);
 }
 
-static gboolean reset_idle(gpointer data)
+/* Unregisters every application, failure markers included. */
+static void close_all_apps(void)
 {
     GHashTableIter iter;
     gpointer value;
@@ -2590,6 +2597,11 @@ static gboolean reset_idle(gpointer data)
         g_hash_table_iter_steal(&iter);
         app_close(value);
     }
+}
+
+static gboolean reset_idle(gpointer data)
+{
+    close_all_apps();
     return G_SOURCE_REMOVE;
 }
 
@@ -2620,6 +2632,14 @@ static void got_listeners(GObject *source, GAsyncResult *result, gpointer data)
     GVariant *ret = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), result, &error);
     GVariant *events;
 
+    /* A reply over a connection already dropped (see drop_bus) is stale. */
+    if (G_DBUS_CONNECTION(source) != watch_conn)
+    {
+        if (ret)
+            g_variant_unref(ret);
+        g_clear_error(&error);
+        return;
+    }
     if (!ret)
     {
         /* Better to watch for nobody than to stay silent for a screen reader. */
@@ -2655,58 +2675,207 @@ static void listeners_changed(GDBusConnection *conn, const char *sender, const c
     ask_listeners();
 }
 
-/* Runs on the AT-SPI thread, so the signals are dispatched there. */
-static void watch_listeners(void)
+/*
+ * The a11y bus may be missing when the bridge starts and may go away
+ * later. The bridge watches the bus launcher's name org.a11y.Bus on the
+ * session bus and asks it for the address whenever it appears; the
+ * watch connection's "closed" signal tells that the a11y bus died, and a
+ * watch of org.a11y.atspi.Registry on it that the registry restarted.
+ * Either loss unregisters every application and says that nobody
+ * listens; after the next connection the listener question decides
+ * again, and the main thread then reports the focus, which registers the
+ * applications on the new bus. All of it runs on the AT-SPI thread.
+ */
+#define BUS_RETRY_MS 2000
+
+static GDBusConnection *session_conn;
+static gboolean bus_owned;          /* org.a11y.Bus has an owner */
+static gboolean connecting;         /* GetAddress in flight */
+static gboolean bus_failure_told;   /* log a failure once until it works */
+static guint retry_source;
+static gulong closed_handler;
+static guint listeners_subscription;
+static guint registry_watch;
+static gboolean registry_seen;
+static gboolean registry_lost;
+
+static void connect_bus(void);
+
+static gboolean retry_connect(gpointer data)
+{
+    retry_source = 0;
+    connect_bus();
+    return G_SOURCE_REMOVE;
+}
+
+/* Tries again while the launcher is there; its new owner tries at once. */
+static void schedule_retry(void)
+{
+    GSource *source;
+
+    if (retry_source || !bus_owned)
+        return;
+    source = g_timeout_source_new(BUS_RETRY_MS);
+    g_source_set_callback(source, retry_connect, NULL, NULL);
+    retry_source = g_source_attach(source, context);
+    g_source_unref(source);
+}
+
+static void bus_failed(const char *what, GError *error)
+{
+    if (!bus_failure_told)
+        g_printerr("wine-atspi: %s: %s; waiting for it\n", what, error->message);
+    bus_failure_told = TRUE;
+    g_error_free(error);
+    schedule_retry();
+}
+
+/* Forgets the a11y bus and everything registered on it. */
+static void drop_bus(void)
+{
+    close_all_apps();
+    if (registry_watch)
+        g_bus_unwatch_name(registry_watch);
+    registry_watch = 0;
+    registry_seen = registry_lost = FALSE;
+    if (watch_conn)
+    {
+        g_signal_handler_disconnect(watch_conn, closed_handler);
+        g_dbus_connection_signal_unsubscribe(watch_conn, listeners_subscription);
+        g_dbus_connection_close(watch_conn, NULL, NULL, NULL);
+        g_clear_object(&watch_conn);
+    }
+    if (key_conn)
+    {
+        g_dbus_connection_close(key_conn, NULL, NULL, NULL);
+        g_clear_object(&key_conn);
+    }
+    g_clear_pointer(&a11y_address, g_free);
+    tell_listening(0);
+}
+
+static void bus_closed(GDBusConnection *conn, gboolean remote_peer_vanished, GError *error,
+                       gpointer data)
+{
+    g_printerr("wine-atspi: a11y bus closed%s%s\n", error ? ": " : "",
+               error ? error->message : "");
+    drop_bus();
+    schedule_retry();
+}
+
+static void registry_appeared(GDBusConnection *conn, const char *name, const char *owner,
+                              gpointer data)
+{
+    registry_seen = TRUE;
+    if (!registry_lost)
+        return;
+    registry_lost = FALSE;
+    g_printerr("wine-atspi: registry back as %s\n", owner);
+    bridge_bus_ready();
+    ask_listeners();
+}
+
+/*
+ * A new registry knows none of the applications embedded in the old one.
+ * Not yet started at all is no loss: the first listener question starts it.
+ */
+static void registry_vanished(GDBusConnection *conn, const char *name, gpointer data)
+{
+    if (!registry_seen)
+        return;
+    registry_seen = FALSE;
+    registry_lost = TRUE;
+    g_printerr("wine-atspi: registry gone\n");
+    close_all_apps();
+    tell_listening(0);
+}
+
+static void got_address(GObject *source, GAsyncResult *result, gpointer data)
 {
     GError *error = NULL;
+    GVariant *ret = g_dbus_connection_call_finish(session_conn, result, &error);
+    char *address;
 
+    connecting = FALSE;
+    if (!ret)
+    {
+        bus_failed("no a11y bus", error);
+        return;
+    }
+    g_variant_get(ret, "(s)", &address);
+    g_variant_unref(ret);
+    /* Created on the AT-SPI thread, so its signals are dispatched here. */
     watch_conn = g_dbus_connection_new_for_address_sync(
-        a11y_address,
+        address,
         G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
             G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION,
         NULL, NULL, &error);
     if (!watch_conn)
     {
-        g_printerr("wine-atspi: no connection to watch listeners: %s\n", error->message);
-        g_error_free(error);
-        tell_listening(1);
+        g_free(address);
+        bus_failed("cannot connect to the a11y bus", error);
         return;
     }
+    a11y_address = address;
+    bus_failure_told = FALSE;
+    g_printerr("wine-atspi: a11y bus at %s\n", address);
+    closed_handler = g_signal_connect(watch_conn, "closed", G_CALLBACK(bus_closed), NULL);
     /* Subscribed before the first question, so no change slips between. */
-    g_dbus_connection_signal_subscribe(watch_conn, "org.a11y.atspi.Registry",
-                                       "org.a11y.atspi.Registry", NULL,
-                                       "/org/a11y/atspi/registry", NULL,
-                                       G_DBUS_SIGNAL_FLAGS_NONE, listeners_changed, NULL, NULL);
+    listeners_subscription = g_dbus_connection_signal_subscribe(
+        watch_conn, "org.a11y.atspi.Registry", "org.a11y.atspi.Registry", NULL,
+        "/org/a11y/atspi/registry", NULL, G_DBUS_SIGNAL_FLAGS_NONE, listeners_changed, NULL,
+        NULL);
+    registry_watch = g_bus_watch_name_on_connection(
+        watch_conn, "org.a11y.atspi.Registry", G_BUS_NAME_WATCHER_FLAGS_NONE,
+        registry_appeared, registry_vanished, NULL, NULL);
+    bridge_bus_ready();
     ask_listeners();
+}
+
+static void connect_bus(void)
+{
+    if (watch_conn || connecting)
+        return;
+    connecting = TRUE;
+    /* May start the launcher, like libatspi does. */
+    g_dbus_connection_call(session_conn, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
+                           "GetAddress", NULL, G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE,
+                           -1, NULL, got_address, NULL);
+}
+
+static void launcher_appeared(GDBusConnection *conn, const char *name, const char *owner,
+                              gpointer data)
+{
+    bus_owned = TRUE;
+    connect_bus();
+}
+
+/* The bus daemon may outlive its launcher; "closed" tells when it goes. */
+static void launcher_vanished(GDBusConnection *conn, const char *name, gpointer data)
+{
+    bus_owned = FALSE;
+    if (retry_source)
+        g_source_remove(retry_source);
+    retry_source = 0;
+    if (!watch_conn && !bus_failure_told)
+    {
+        g_printerr("wine-atspi: no a11y bus yet; waiting for org.a11y.Bus\n");
+        bus_failure_told = TRUE;
+    }
 }
 
 int atspi_init(void)
 {
     GError *error = NULL;
-    GDBusConnection *session;
-    GVariant *ret;
 
-    session = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, &error);
-    if (session)
+    /* Without a session bus there is no a11y bus to wait for. */
+    session_conn = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, &error);
+    if (!session_conn)
     {
-        ret = g_dbus_connection_call_sync(session, "org.a11y.Bus", "/org/a11y/bus",
-                                          "org.a11y.Bus", "GetAddress", NULL,
-                                          G_VARIANT_TYPE("(s)"),
-                                          G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
-        if (ret)
-        {
-            g_variant_get(ret, "(s)", &a11y_address);
-            g_variant_unref(ret);
-        }
-        g_object_unref(session);
-    }
-    if (!a11y_address)
-    {
-        g_printerr("wine-atspi: no a11y bus: %s\n", error->message);
+        g_printerr("wine-atspi: no session bus: %s\n", error->message);
         g_error_free(error);
         return 1;
     }
-
     context = g_main_context_new();
     introspection = g_dbus_node_info_new_for_xml(introspection_xml, NULL);
     apps = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -2717,6 +2886,8 @@ void atspi_run(void)
 {
     /* All D-Bus dispatching of the per-process connections happens here. */
     g_main_context_push_thread_default(context);
-    watch_listeners();
+    g_bus_watch_name_on_connection(session_conn, "org.a11y.Bus",
+                                   G_BUS_NAME_WATCHER_FLAGS_AUTO_START, launcher_appeared,
+                                   launcher_vanished, NULL, NULL);
     g_main_loop_run(g_main_loop_new(context, FALSE));
 }

@@ -64,6 +64,11 @@ void bridge_set_listening(int listening)
     PostThreadMessageW(main_thread_id, WM_LISTENING, listening, 0);
 }
 
+void bridge_bus_ready(void)
+{
+    PostThreadMessageW(main_thread_id, WM_BUS_READY, 0, 0);
+}
+
 static void stop_watching(void)
 {
     if (!hooks.on)
@@ -172,6 +177,21 @@ static int run_bridge(BOOL service, BOOL always_on)
                     stop_watching();
                 else if (!start_watching())
                     trace(L"cannot install the hooks");
+                continue;
+            }
+            /*
+             * Whatever was reported before went nowhere (no bus yet, or a
+             * bus or registry that died). Without hooks the listener
+             * answer that follows starts them and reports the focus.
+             */
+            if (!msg.hwnd && msg.message == WM_BUS_READY)
+            {
+                trace(L"a11y bus ready");
+                if (hooks.on)
+                {
+                    forget_focus();
+                    check_missed_focus();
+                }
                 continue;
             }
             TranslateMessage(&msg);
