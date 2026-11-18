@@ -12,12 +12,18 @@
  * string, table, math, utf8 and coroutine, plus the table wa:
  *
  *   wa.onDescribe(fn)    fn(obj) is called for each object the bridge
- *                        describes; it may change obj.name, obj.value,
- *                        obj.role, obj.states, obj.position, obj.setSize
- *                        and obj.level. obj.hwnd and obj.child (MSAA child
- *                        id, 0 for the window itself) say what it is.
- *                        Roles are AT-SPI role names ("list item"),
+ *                        describes (so far a ListBox and its items); it
+ *                        may change obj.name, obj.value, obj.role,
+ *                        obj.states, obj.position, obj.setSize, obj.level
+ *                        and obj.columns. obj.hwnd and obj.child (MSAA
+ *                        child id, 0 for the window itself) say what it
+ *                        is. Roles are AT-SPI role names ("list item"),
  *                        states a set of names (obj.states.selected).
+ *                        obj.columns is an array of texts: the column
+ *                        headers of a "table", the cells of the row of a
+ *                        "table cell" (the first is the cell itself). A
+ *                        list becomes a table with role and headers, its
+ *                        items cells with role and cells.
  *   wa.className(hwnd)   window class, or nil
  *   wa.parent(hwnd)      parent window, or nil
  *   wa.sendMessage(hwnd, msg, wparam, lparam [, timeout_ms])
@@ -30,6 +36,14 @@
  *                        string.unpack; nil if not readable
  *   wa.readWideString(hwnd, address, max_chars)
  *                        UTF-16 text of the target up to its NUL, as UTF-8
+ *   wa.windowLong(hwnd, index)
+ *                        GetWindowLongPtr, e.g. GWLP_ID (-12) or
+ *                        GWLP_USERDATA (-21); nil on error
+ *   wa.dlgItem(hwnd, id) child window with that control id, or nil
+ *   wa.headerTexts(hwnd) item texts of a header control (SysHeader32) by
+ *                        index, as an array; nil if it did not answer
+ *   wa.formatFileTime(t) FILETIME (UTC, one 64-bit integer) as local date
+ *                        and time without seconds; "" for 0
  *   wa.log(...)          writes to the trace when WINE_ATSPI_DEBUG is set
  *
  * print also goes to the trace. Errors of a script go to stderr or the
@@ -326,6 +340,117 @@ static int wa_read_wide_string(lua_State *L)
     return ok ? 1 : 0;
 }
 
+/* GetWindowLongPtrW; GWLP_USERDATA and GWLP_ID work across processes. */
+static int wa_window_long(lua_State *L)
+{
+    HWND hwnd = check_hwnd(L, 1);
+    int index = (int)luaL_checkinteger(L, 2);
+    LONG_PTR value;
+
+    SetLastError(0);
+    value = GetWindowLongPtrW(hwnd, index);
+    if (!value && GetLastError())
+        return 0;
+    lua_pushinteger(L, (lua_Integer)value);
+    return 1;
+}
+
+static int wa_dlg_item(lua_State *L)
+{
+    HWND item = GetDlgItem(check_hwnd(L, 1), (int)luaL_checkinteger(L, 2));
+
+    if (!item)
+        return 0;
+    lua_pushinteger(L, (lua_Integer)(ULONG_PTR)item);
+    return 1;
+}
+
+/* HDITEMW of a 32-bit target, up to cchTextMax. */
+struct hditem32
+{
+    UINT mask;
+    int cxy;
+    ULONG pszText;
+    ULONG hbm;
+    int cchTextMax;
+};
+
+/*
+ * wa.headerTexts(hwnd): texts of the items of a header control
+ * (SysHeader32) by index, as an array; nil if it did not answer.
+ * HDM_GETITEMW needs memory in the target.
+ */
+static int wa_header_texts(lua_State *L)
+{
+    HWND hwnd = check_hwnd(L, 1);
+    BYTE header[REMOTE_HEADER];
+    WCHAR text[CELL_TEXT_MAX];
+    char utf8[NAME_MAX_UTF8];
+    DWORD_PTR count = 0;
+    struct remote r;
+    int i;
+
+    if (!send_message(hwnd, HDM_GETITEMCOUNT, 0, 0, SEND_TIMEOUT_MS, &count) ||
+        (LONG)count < 0 || !remote_open(hwnd, &r))
+        return 0;
+    if (count > MAX_COLUMNS * 4)
+        count = MAX_COLUMNS * 4;
+    lua_createtable(L, (int)count, 0);
+    for (i = 0; i < (int)count; i++)
+    {
+        memset(header, 0, sizeof(header));
+        REMOTE_STRUCT(&r, header, HDITEMW, struct hditem32, hd,
+                      hd->mask = HDI_TEXT;
+                      REMOTE_PTR(hd->pszText, REMOTE_TEXT(&r));
+                      hd->cchTextMax = CELL_TEXT_MAX;);
+        if (!remote_text(hwnd, &r, HDM_GETITEMW, i, header, text))
+            break;
+        to_utf8(text, utf8, sizeof(utf8));
+        lua_pushstring(L, utf8);
+        lua_rawseti(L, -2, i + 1);
+    }
+    remote_close(&r);
+    if (i < (int)count)
+    {
+        lua_pop(L, 1);
+        return 0;
+    }
+    return 1;
+}
+
+/*
+ * wa.formatFileTime(t): a FILETIME (UTC, as one 64-bit integer) as local
+ * date and time in the user's format, like Explorer and winefile show it;
+ * "" for 0.
+ */
+static int wa_format_file_time(lua_State *L)
+{
+    ULONGLONG t = (ULONGLONG)luaL_checkinteger(L, 1);
+    WCHAR buf[128];
+    char utf8[128 * 3];
+    SYSTEMTIME st;
+    FILETIME ft, local;
+    int len;
+
+    if (!t)
+    {
+        lua_pushliteral(L, "");
+        return 1;
+    }
+    ft.dwLowDateTime = (DWORD)t;
+    ft.dwHighDateTime = (DWORD)(t >> 32);
+    if (!FileTimeToLocalFileTime(&ft, &local) || !FileTimeToSystemTime(&local, &st) ||
+        !(len = GetDateFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buf, ARRAYSIZE(buf))))
+        return 0;
+    buf[len - 1] = ' ';
+    if (!GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buf + len,
+                        ARRAYSIZE(buf) - len))
+        buf[len - 1] = 0;
+    to_utf8(buf, utf8, sizeof(utf8));
+    lua_pushstring(L, utf8);
+    return 1;
+}
+
 /* wa.log and print: the arguments joined by spaces, to the trace. */
 static int wa_log(lua_State *L)
 {
@@ -380,6 +505,10 @@ static lua_State *load_script(const char *app)
         { "pointerSize", wa_pointer_size },
         { "readMemory", wa_read_memory },
         { "readWideString", wa_read_wide_string },
+        { "windowLong", wa_window_long },
+        { "dlgItem", wa_dlg_item },
+        { "headerTexts", wa_header_texts },
+        { "formatFileTime", wa_format_file_time },
         { NULL, NULL },
     };
     static const WCHAR *const dirs[] = { L"\\scripts\\", L"\\..\\scripts\\" };
@@ -538,6 +667,50 @@ static void push_object(lua_State *L, const struct bridge_object *obj)
             lua_setfield(L, -2, state_names[i].name);
         }
     lua_setfield(L, -2, "states");
+    if (obj->column_count > 0 && obj->columns)
+    {
+        lua_createtable(L, obj->column_count, 0);
+        for (i = 0; i < obj->column_count; i++)
+        {
+            lua_pushstring(L, obj->columns[i] ? obj->columns[i] : "");
+            lua_rawseti(L, -2, i + 1);
+        }
+        lua_setfield(L, -2, "columns");
+    }
+}
+
+/*
+ * Takes obj.columns of the table on top, if it is a table: header texts
+ * of a table into str->headers, cell texts of a row into str->cells. The
+ * cell rectangles stay only if the number of columns did not change.
+ */
+static void pull_columns(lua_State *L, struct bridge_object *obj, struct focus_strings *str)
+{
+    BOOL table = obj->role == BRIDGE_ROLE_TABLE;
+    char (*texts)[NAME_MAX_UTF8] = table ? str->headers : str->cells;
+    const char **ptrs = table ? str->header_ptrs : str->cell_ptrs;
+    lua_Integer i, n;
+
+    if (lua_getfield(L, -1, "columns") != LUA_TTABLE)
+    {
+        lua_pop(L, 1);
+        return;
+    }
+    n = lua_rawlen(L, -1);
+    if (n > MAX_COLUMNS)
+        n = MAX_COLUMNS;
+    for (i = 0; i < n; i++)
+    {
+        lua_rawgeti(L, -1, i + 1);
+        lstrcpynA(texts[i], lua_isstring(L, -1) ? lua_tostring(L, -1) : "", NAME_MAX_UTF8);
+        ptrs[i] = texts[i];
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+    if (n != obj->column_count)
+        obj->column_extents = NULL;
+    obj->column_count = (int)n;
+    obj->columns = n ? ptrs : NULL;
 }
 
 /*
@@ -571,11 +744,13 @@ static void get_integer_field(lua_State *L, const char *key, int *value)
 /* Takes the fields a script may change from the table on top into obj. */
 static void pull_object(lua_State *L, struct bridge_object *obj, struct focus_strings *str)
 {
+    /* A list described as the parent of its item keeps its name in str->container. */
+    char *name = obj->name == str->container ? str->container : str->object;
     char role[32];
     int i;
 
-    if (get_string_field(L, "name", obj->name, str->object, sizeof(str->object)))
-        obj->name = str->object;
+    if (get_string_field(L, "name", obj->name, name, NAME_MAX_UTF8))
+        obj->name = name;
     if (get_string_field(L, "value", obj->value, str->value, sizeof(str->value)))
         obj->value = str->value;
     if (get_string_field(L, "role", "", role, sizeof(role)))
@@ -596,6 +771,7 @@ static void pull_object(lua_State *L, struct bridge_object *obj, struct focus_st
             lua_pop(L, 1);
         }
     lua_pop(L, 1);
+    pull_columns(L, obj, str);
 }
 
 /*

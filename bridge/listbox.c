@@ -189,6 +189,8 @@ static void listbox_describe_self(HWND hwnd, struct bridge_object *obj,
                                   struct focus_strings *str)
 {
     describe_list_box(hwnd, FALSE, obj, str);
+    /* winefile.lua makes its panes a tree and a table. */
+    script_describe(obj, str);
 }
 
 /* Items from the top one down to the first out of view. */

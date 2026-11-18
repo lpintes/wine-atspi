@@ -77,8 +77,10 @@ the same way NVDA does.
     generates calls with its own ABI assumptions);
   - roles are AT-SPI role names, states a set of names;
   - an onDescribe hook may change name, value, role, states, position,
-    set size and level; it is called from `describe_listbox_item` only
-    so far, other describers get it when a script needs them;
+    set size, level and columns (headers of a table, cells of a row); it
+    is called for a `ListBox` and its items only so far
+    (`describe_listbox_item`, `listbox_describe_self`), other describers
+    get it when a script needs them;
   - hooks for events (focus, key, window) come when a script needs them;
   - the interface grows from real cases.
 - **One AT-SPI application per Wine process**, each with its own D-Bus
@@ -608,6 +610,18 @@ Found with the bridge and Wine's winefile (`build/exp-winefile.sh`,
   `LB_GETITEMDATA` and `ReadProcessMemory`, since 2026-11-18 in the
   application script `scripts/winefile.lua` (`tests/bridge-winefile.sh`).
   The layout comes from Wine's source; re-check after Wine upgrades.
+- Since 2026-11-18 the script makes the folder tree (control id 3,
+  `IDW_TREE_LEFT`) a `tree` and the file list (id 6) a `table`. A tree
+  item's level is `Entry.level` + 1, expandable if not scanned yet or it
+  has a subfolder; winefile sorts ".", ".." and folders before files
+  (`compareType`), so the walks stop at the first file. The table's
+  columns are name, size and modification date, headed by the texts of
+  the `SysHeader32` with id 5, whose item 0 is the empty icon column;
+  `Pane.visible_cols` (the list's `GWLP_USERDATA`) 0 (View > Name) keeps
+  it a list. Return in the tree expands or collapses `pane->cur`, which
+  after Tab need not be the item with the caret (seen in
+  `tests/bridge-winefile.sh`: Return expanded the current folder while
+  the caret was on item 0); a winefile quirk.
 - A large folder (`Z:\lib64`, 4000 files) keeps winefile busy for
   seconds; the key check then gives up on the busy list.
 

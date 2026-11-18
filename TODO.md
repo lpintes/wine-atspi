@@ -8,8 +8,6 @@ Planned work in the order it should be done. Verified facts go to
 See "Application scripts" in `CLAUDE.md` and the API in
 `bridge/script.c`.
 
-- winefile: add level, expanded, size and date for its panes in
-  `scripts/winefile.lua`.
 - A script error is reported on every call (158 lines for one test run);
   report each distinct error once.
 - A changed script is read only when the bridge starts; reloading it on a
