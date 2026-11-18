@@ -52,12 +52,11 @@ static BOOL is_text_static(HWND hwnd)
 void find_label(HWND hwnd, char *dst, int size)
 {
     WCHAR cls[64], buf[NAME_MAX_UTF8 / 3];
-    HWND parent, cur;
+    HWND combo, cur;
 
     dst[0] = 0;
-    while ((parent = GetParent(hwnd)) && GetClassNameW(parent, cls, ARRAYSIZE(cls)) &&
-           (!lstrcmpiW(cls, L"ComboBox") || !lstrcmpiW(cls, L"ComboBoxEx32")))
-        hwnd = parent;
+    if ((combo = outer_combo(hwnd)))
+        hwnd = combo;
     for (cur = GetWindow(hwnd, GW_HWNDPREV); cur; cur = GetWindow(cur, GW_HWNDPREV))
     {
         if (!(GetWindowLongW(cur, GWL_STYLE) & WS_VISIBLE))

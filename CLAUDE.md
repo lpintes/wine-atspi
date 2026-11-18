@@ -320,6 +320,16 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   a text child or the selected child, then from the name
   (`generator.py`, `_get_combo_box_value`). The bridge exposes the combo
   text as `valuetext` and leaves the name for a label.
+- A combo box with an entry child is an "editable combo box"
+  (`is_editable_combo_box`), and Orca speaks no role for a child of a
+  combo box (`_should_speak_role`); there is no name dedupe between an
+  ancestor and the focus. As in GTK, the bridge puts the `Edit` of a
+  combo box below it (also inside a `ComboBoxEx32`'s `ComboBox`,
+  `combo_edit`, `outer_combo`) and leaves it unnamed, so focus should
+  say the label once with "editable combo box" (from the source, not yet
+  heard with Orca; `tests/bridge-notepad.sh` and
+  `tests/bridge-propsheet.sh` log the tree). The focus carries the combo box
+  as container, since the tree may be dropped as busy (Open dialog).
 - `object:selection-changed` whose source is the focused combo box makes
   Orca present the combo box again (`_on_selection_changed`). The bridge
   emits it when the combo value changes.

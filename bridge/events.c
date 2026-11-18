@@ -136,8 +136,8 @@ static void CALLBACK check_busy_focus(HWND unused, UINT msg, UINT_PTR id, DWORD 
 void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 {
     struct bridge_focus focus;
-    struct focus_strings str;
-    HWND top = GetAncestor(hwnd, GA_ROOT);
+    struct focus_strings str, *combo_str = NULL;
+    HWND top = GetAncestor(hwnd, GA_ROOT), combo;
     DWORD pid = 0, start = GetTickCount();
     ULONG sent = send_count;
 
@@ -166,6 +166,16 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     if (focus.object.child && id_object == OBJID_CLIENT &&
         focus.object.role != BRIDGE_ROLE_TERMINAL)
         describe_container(hwnd, &focus.container, &str);
+    /*
+     * The Edit of a combo box lives in the combo box, also when the tree
+     * that would place it there is dropped as busy (the Open dialog).
+     */
+    else if (!focus.object.child && id_object == OBJID_CLIENT &&
+             (focus.object.role == BRIDGE_ROLE_ENTRY || focus.object.role == BRIDGE_ROLE_TEXT) &&
+             (combo = outer_combo(hwnd)) &&
+             (combo_str = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*combo_str))) &&
+             !describe_object(combo, OBJID_CLIENT, CHILDID_SELF, &focus.container, combo_str))
+        memset(&focus.container, 0, sizeof(focus.container));
     GetWindowThreadProcessId(hwnd, &pid);
     /* A console window belongs to conhost.exe; the application is its program. */
     if (focus.object.role == BRIDGE_ROLE_TERMINAL && console_client.hwnd == hwnd)
@@ -190,6 +200,11 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
           id_object, id_child, focus.object.name, focus.object.position, focus.object.set_size,
           focus.object.level, send_count - sent, GetTickCount() - start);
     free_strings(&str);
+    if (combo_str)
+    {
+        free_strings(combo_str);
+        HeapFree(GetProcessHeap(), 0, combo_str);
+    }
     report_status_bar(top);
 
     last_focus.hwnd = hwnd;

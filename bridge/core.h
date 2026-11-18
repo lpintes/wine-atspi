@@ -247,6 +247,8 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
                      struct bridge_object *obj, struct focus_strings *str);
 void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
 void describe_frame(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
+HWND outer_combo(HWND hwnd);
+HWND combo_edit(HWND combo);
 
 /* range.c */
 HWND find_updown(HWND hwnd);

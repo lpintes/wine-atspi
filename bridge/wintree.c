@@ -51,9 +51,10 @@ static enum tree_kind tree_kind(HWND hwnd, const WCHAR *cls)
         return TREE_SKIP;
     role = role_from_class(hwnd, cls);
     /*
-     * The windows inside a known control are its parts (the Edit and list
-     * of a combo box, the header of a list view); a toolbar can hold real
-     * controls, e.g. wordpad's font combo boxes.
+     * The windows inside a known control are its parts (the inner
+     * ComboBox of a ComboBoxEx32, the header of a list view); only the
+     * Edit of a combo box is added, see add_tree_children. A toolbar can
+     * hold real controls, e.g. wordpad's font combo boxes.
      */
     if (role != BRIDGE_ROLE_UNKNOWN && role != BRIDGE_ROLE_TOOL_BAR)
         return TREE_LEAF;
@@ -191,7 +192,7 @@ static void add_tree_items(struct tree_build *b, HWND hwnd, const struct item_ha
 static void add_tree_children(struct tree_build *b, HWND parent)
 {
     WCHAR cls[256];
-    HWND hwnd;
+    HWND hwnd, edit;
 
     for (hwnd = GetWindow(parent, GW_CHILD); hwnd && b->count < MAX_TREE;
          hwnd = GetWindow(hwnd, GW_HWNDNEXT))
@@ -212,6 +213,19 @@ static void add_tree_children(struct tree_build *b, HWND parent)
         keep_strings(obj);
         free_strings(b->str);
         b->parents[b->count++] = (ULONG_PTR)parent;
+        /* The Edit of a combo box is its child, as the entry of a GTK one. */
+        if (obj->role == BRIDGE_ROLE_COMBO_BOX && (edit = combo_edit(hwnd)) &&
+            b->count < MAX_TREE)
+        {
+            struct bridge_object *entry = &b->objects[b->count];
+
+            if (describe_tree_window(edit, L"Edit", entry, b->str))
+            {
+                keep_strings(entry);
+                b->parents[b->count++] = (ULONG_PTR)hwnd;
+            }
+            free_strings(b->str);
+        }
         /* A toolbar has both: its buttons and controls on it. */
         if (b->items && (handler = find_item_handler(cls)))
             add_tree_items(b, hwnd, handler);

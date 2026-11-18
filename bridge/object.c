@@ -93,6 +93,49 @@ static unsigned long long map_states(LONG state)
     return s;
 }
 
+static BOOL is_combo_class(const WCHAR *cls)
+{
+    return !lstrcmpiW(cls, L"ComboBox") || !lstrcmpiW(cls, L"ComboBoxEx32");
+}
+
+/*
+ * The outermost combo box that hwnd is part of, e.g. the ComboBoxEx32
+ * around the ComboBox around the Open dialog's file name Edit; NULL if
+ * the parent of hwnd is no combo box.
+ */
+HWND outer_combo(HWND hwnd)
+{
+    WCHAR cls[64];
+    HWND parent, combo = NULL;
+
+    while ((parent = GetParent(hwnd)) && GetClassNameW(parent, cls, ARRAYSIZE(cls)) &&
+           is_combo_class(cls))
+        combo = hwnd = parent;
+    return combo;
+}
+
+/*
+ * The visible Edit of combo box combo, also inside the ComboBox of a
+ * ComboBoxEx32 (which has a hidden Edit of its own); NULL for a drop-down
+ * list. No message: CB_GETCOMBOBOXINFO would need memory in the target.
+ */
+HWND combo_edit(HWND combo)
+{
+    WCHAR cls[64];
+    HWND hwnd, edit;
+
+    for (hwnd = GetWindow(combo, GW_CHILD); hwnd; hwnd = GetWindow(hwnd, GW_HWNDNEXT))
+    {
+        if (!IsWindowVisible(hwnd) || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)))
+            continue;
+        if (!lstrcmpiW(cls, L"Edit"))
+            return hwnd;
+        if (is_combo_class(cls) && (edit = combo_edit(hwnd)))
+            return edit;
+    }
+    return NULL;
+}
+
 /*
  * Wine's oleacc has no proxy for most standard controls and calls them
  * "client". For a whole window the class tells more.
@@ -324,7 +367,8 @@ static BOOL describe_window(HWND hwnd, const WCHAR *cls, struct bridge_object *o
          */
         if (!send_message(hwnd, WM_NULL, 0, 0, SEND_TIMEOUT_MS, NULL))
             return FALSE;
-        if (edit)
+        /* The Edit of a combo box is unnamed, see describe_object. */
+        if (edit && !outer_combo(hwnd))
             edit_label(hwnd, str->object, sizeof(str->object));
     }
     else if (!lstrcmpiW(cls, L"Static") || !lstrcmpiW(cls, L"Button"))
@@ -458,7 +502,13 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
         obj->value = str->value;
         str->object[0] = 0;
     }
-    if (!str->object[0] && !obj->child && needs_label(obj->role))
+    /*
+     * The Edit of a combo box is its child and stays unnamed, as the entry
+     * of a GTK combo box: the combo box has the label, and Orca says
+     * "editable combo box" for it as an ancestor of the entry.
+     */
+    if (!str->object[0] && !obj->child && needs_label(obj->role) &&
+        !(!lstrcmpiW(cls, L"Edit") && outer_combo(hwnd)))
         find_label(hwnd, str->object, sizeof(str->object));
     if (handler && !obj->child)
         handler->describe_self(hwnd, obj, str);

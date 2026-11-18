@@ -22,8 +22,6 @@ Window tree (object navigation, flat review):
   boxes, toolbar buttons), if Orca's mouse click fallback is not good
   enough.
 - A focused item scrolled out of view keeps `showing` and its old rect.
-- The focused `Edit` of a combo box (file name field of the Open dialog)
-  hangs below the frame next to its combo box.
 - On a new top-level window the tree is posted synchronously before the
   focus (up to about 80 ms delay before speech). Each child window costs
   about 6 ms to describe, mostly cross-process messages, not MSAA
