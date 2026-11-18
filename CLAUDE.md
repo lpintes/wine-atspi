@@ -756,6 +756,25 @@ XTest keys, Wine 11.21, 2026-11-09).
   change fixes it (automatic test and Orca by hand). Reported as
   mate-desktop/marco#847, fix in PR #848 (2026-11-09); related #703.
 
+Found with changing texts and winecfg (`tests/bridge-controls.sh`,
+`tests/bridge-propsheet.sh`, Wine 11.21, 2026-11-18).
+
+- A `Static` passes `WM_SETTEXT` to `DefWindowProc` (`user32/static.c`),
+  which notifies `EVENT_OBJECT_NAMECHANGE` on `OBJID_WINDOW`
+  (`win32u/defwnd.c`). The bridge refreshes the window tree on it, so a
+  label that changes without focus (progress dialog text; "Run" in
+  `tests/controls.c`) emits `accessible-name` and Where Am I and flat
+  review read the new text. It is not spoken: Orca presents a name
+  change only for the locus of focus or a frame
+  (`is_presentable_name_change`), NVDA only for the focus object
+  (`NVDAObject.event_nameChange`). Left so.
+- winecfg is a property sheet: each page is a child `#32770`, a panel
+  in the tree, and Ctrl+Page Down hides one page and shows the next
+  without a new top-level window. Labels sent with a focus went below
+  the frame until the next tree moved them into the page, so the focus
+  carries labels only when it enters a new top-level window; in a known
+  one the tree places them (`on_focus`).
+
 Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
 2026-11-17).
 

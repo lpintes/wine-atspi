@@ -154,7 +154,15 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     }
     busy_focus_retries = 0;
     describe_frame(top, &focus.frame, &str);
-    describe_labels(top, &focus, &str);
+    /*
+     * The labels for a new window, in case its tree below is dropped as
+     * busy: Orca reads them when focus enters a dialog. In a known window
+     * the tree places them; labels sent with the focus would hang below
+     * the frame until the next tree moves them into a page of a property
+     * sheet (winecfg, Ctrl+Page Down).
+     */
+    if (top != tree_top)
+        describe_labels(top, &focus, &str);
     if (focus.object.child && id_object == OBJID_CLIENT &&
         focus.object.role != BRIDGE_ROLE_TERMINAL)
         describe_container(hwnd, &focus.container, &str);

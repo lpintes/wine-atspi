@@ -49,9 +49,6 @@ Controls:
 - Tree view: check boxes not read; removed items stay as nodes.
 - Tabs and list items: an item left behind keeps "selected"; Ctrl+Tab
   inside a property sheet page is not followed; `TCS_BUTTONS` untested.
-- A `Static` whose text changes without a focus change (progress
-  dialogs) is not followed; labels of nested child dialogs hang below the
-  frame.
 - 32-bit layouts (`LVITEMW`, `TVITEMW`, `TCITEMW`) untested.
 - Console: a full buffer (150 rows) shifts lines up, so the diff gives
   one huge delete + insert; wide (CJK) cells untested.

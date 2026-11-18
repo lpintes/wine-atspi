@@ -20,6 +20,9 @@
  *   "Count:"   Edit with a msctls_updown32 buddy, 1 to 10 at 3
  *   "Run"      Button: fills "Level:" from 0 to 100 in 20 s
  *   "Close"    Button
+ *   Static after "Close", no tab stop: "Idle", then "Step n of 20"
+ *              while "Run" fills the bar, "Done" at the end; it labels
+ *              no control, like the text of a progress dialog
  *   ToolbarWindow32 at the bottom, flat, with the buttons New, a
  *              separator, Bold (check), Wrap (check, checked), Undo
  *              (disabled, text from the string list) and Help, without
@@ -33,7 +36,7 @@
 #define CLASS_NAME L"WineAtspiControls"
 
 enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_VOLUME,
-       ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE, ID_TOOLS, ID_NEW, ID_BOLD,
+       ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE, ID_STEP, ID_TOOLS, ID_NEW, ID_BOLD,
        ID_WRAP, ID_UNDO, ID_HELP };
 
 /* "Run" fills "Level:" from 0 to 100 in 20 s, as a long task would. */
@@ -243,16 +246,23 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                     120, 660, 100, 25, ID_RUN);
         add_control(hwnd, L"Button", L"Close", WS_TABSTOP | BS_PUSHBUTTON,
                     240, 660, 100, 25, ID_CLOSE);
+        add_control(hwnd, L"Static", L"Idle", SS_LEFT, 360, 663, 120, 20, ID_STEP);
         add_tools(hwnd, 700);
         return 0;
     case WM_TIMER:
     {
         HWND bar = GetDlgItem(hwnd, ID_LEVEL);
         int pos = (int)SendMessageW(bar, PBM_GETPOS, 0, 0) + RUN_STEP;
+        WCHAR step[32];
 
         SendMessageW(bar, PBM_SETPOS, pos, 0);
+        wsprintfW(step, L"Step %d of %d", pos / RUN_STEP, 100 / RUN_STEP);
         if (pos >= 100)
+        {
             KillTimer(hwnd, ID_RUN);
+            lstrcpyW(step, L"Done");
+        }
+        SetDlgItemTextW(hwnd, ID_STEP, step);
         return 0;
     }
     case WM_HSCROLL:
