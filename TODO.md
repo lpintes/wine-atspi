@@ -54,8 +54,6 @@ Controls:
 
 Bridge:
 
-- While the bridge waits in `SendMessageTimeout` (up to 500 ms) its LL
-  keyboard hook is not served.
 - Method calls get the node pointer from `subtree_dispatch`; a node freed
   in between would dangle. Not seen. Idea: pass `app` and look the node
   up by path in `method_call`. Unverified assumption: today GDBus method

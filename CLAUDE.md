@@ -122,6 +122,16 @@ Checked in the Wine source (`C:\vcs\github.com\wine-mirror\wine`, Wine 11.21,
     `LB_SETCURSEL` and `WM_SETFOCUS`. The bridge therefore re-reads the
     focused object 50 ms after each key (`check_after_key` in
     `bridge/events.c`) and asks a list box for `LB_GETCARETINDEX`.
+- The bridge's LL keyboard hook is served while it waits in
+  `SendMessageTimeoutW`. The server queues the hook call as a sent
+  message (`MSG_HOOK_LL`, `send_hook_ll_message` in `server/queue.c`,
+  2 s timeout), and without `SMTO_BLOCK` `wait_message_reply`
+  (`win32u/message.c`) processes sent messages while it waits. The same
+  holds for out-of-context WinEvents (`MSG_WINEVENT`) and the menu
+  hook's `WM_COPYDATA`, so `keyboard_proc`, `win_event_proc` and the
+  menu sink run nested inside any `send_message`. They therefore only
+  set timers or schedule work; only a progress bar's value change is
+  described at once (`on_value_change`).
 - Standard messages with pointers (`WM_GETTEXT`, `EM_GETLINE`, ...) are
   marshalled across processes by Wine like on Windows. Custom messages with
   pointers (`SCI_GETTEXTRANGE`, `LVM_GETITEMTEXTW`, `TVM_GETITEMW`, ...) are
