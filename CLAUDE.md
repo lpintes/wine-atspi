@@ -516,6 +516,18 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   (`toolbar_focus`). A toolbar answers `WM_GETDLGCODE` with 0, so
   `IsDialogMessage` takes its arrow keys; `tests/controls.c` subclasses
   it. Confirmed with Orca on `tests/controls.c` (2026-11-10).
+- A window that appears without a key does not interrupt speech: notepad
+  started from a terminal is spoken only after the queued terminal
+  output. Orca sets the new frame as locus of focus through
+  `set_active_window` without an event (from `_on_active_changed` or
+  `_on_window_activated`), and `_should_interrupt_for_focus_change`
+  (`presentation_manager.py`) returns False for "event is None"; the
+  following focus on the `Edit` does not interrupt either, because the
+  old focus is a named ancestor. GTK 3 windows behave the same (debug
+  log, mate-terminal), although GTK sends `window:activate` before
+  `state-changed:active` and the bridge the other way round. Orca
+  interrupts on a key press. Not a bridge bug (2026-11-18, debug log
+  with `orca --debug-file`).
 
 Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
 
