@@ -19,6 +19,9 @@ wineserver -k; wineserver -w
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so --always-on > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
+# regedit reopens the key it showed last; start at My Computer.
+wine reg delete 'HKCU\Software\Microsoft\Windows\CurrentVersion\Applets\Regedit' \
+    /v LastKey /f > /dev/null 2>&1
 wine regedit &
 sleep 3
 

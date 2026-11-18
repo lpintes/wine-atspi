@@ -2070,11 +2070,34 @@ static void set_labels(struct app *app, struct node *frame, const struct bridge_
     g_ptr_array_free(kept, TRUE);
 }
 
+/*
+ * Removes old, the focus before now, if it is an item of a control that
+ * is scrolled away (not showing): the window tree has the items in view
+ * only and kept it for the focus (tree_idle), and an item described by a
+ * focus outside the view was never in a tree. Removing the first cell of
+ * a row takes the row's other cells along (node_remove), so nothing is
+ * removed while now is in old's row.
+ */
+static void drop_hidden_item(struct node *old, struct node *now)
+{
+    struct node *parent = old->parent;
+
+    if (!parent || parent == now || old->hwnd != parent->hwnd ||
+        (old->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING)))
+        return;
+    if (old->role != BRIDGE_ROLE_TREE_ITEM && old->role != BRIDGE_ROLE_LIST_ITEM &&
+        old->role != BRIDGE_ROLE_TABLE_CELL && old->role != BRIDGE_ROLE_PAGE_TAB)
+        return;
+    if (parent->role == BRIDGE_ROLE_TABLE && now->parent == parent && now->row == old->row)
+        return;
+    node_remove(old);
+}
+
 static gboolean focus_idle(gpointer data)
 {
     const struct bridge_focus *f = data;
     struct app *app = get_app(f->pid, f->app_name);
-    struct node *frame, *parent, *obj;
+    struct node *frame, *parent, *obj, *old;
     gint i;
 
     if (!app)
@@ -2103,9 +2126,12 @@ static gboolean focus_idle(gpointer data)
         set_state(frame, BRIDGE_STATE_ACTIVE, TRUE);
         emit(frame, EVENT_WINDOW, "Activate", "", 0, 0, g_variant_new_string(""));
     }
-    if (focused && focused != obj)
-        set_state(focused, BRIDGE_STATE_FOCUSED, FALSE);
+    old = focused;
+    if (old && old != obj)
+        set_state(old, BRIDGE_STATE_FOCUSED, FALSE);
     focused = obj;
+    if (old && old != obj)
+        drop_hidden_item(old, obj);
     /* Announce even a repeated focus, e.g. returning from a menu. */
     obj->states &= ~BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
     set_state(obj, BRIDGE_STATE_FOCUSED, TRUE);
@@ -2280,9 +2306,9 @@ static gboolean tree_idle(gpointer data)
      * Tree nodes have tree nodes or the frame as parents, so none is freed
      * here. An item scrolled away leaves too, but not the focused one: the
      * focus stays where it is, no longer showing and without its old
-     * rectangle (the tree has the items in view only). A tree without items
-     * keeps the items of a control that stays (items have the hwnd of their
-     * control).
+     * rectangle (the tree has the items in view only); focus_idle removes it
+     * when the focus moves on. A tree without items keeps the items of a
+     * control that stays (items have the hwnd of their control).
      */
     for (j = 0; j < old->len; j++)
     {

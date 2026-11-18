@@ -716,12 +716,19 @@ Found with regedit's tree (`tests/perf-tree.sh` in the VM, 2026-11-18).
   view, so the focused item that leaves it stays below its control but
   loses `showing` and its rect (`tree_idle`); an item described outside
   its control's client area gets no `showing` (`clip_item_showing`).
+  Either is removed when the focus moves on (`drop_hidden_item` in
+  `focus_idle`): a later tree may cover only another control's items
+  (Tab from regedit's tree to its value list) and would keep it forever.
   `SetScrollInfo` notifies `EVENT_OBJECT_VALUECHANGE` with
   `OBJID_VSCROLL` / `OBJID_HSCROLL` on the scrolled window
   (`win32u/scroll.c`), which refreshes the items of a list, tree or tab
   control after a mouse wheel too (`on_value_change`; the wheel itself
   not tested). Checked in `tests/bridge-tree.sh` (regedit Ctrl+End and
-  Ctrl+Home, 2026-11-18).
+  Ctrl+Home, then Ctrl+End and Tab, 2026-11-18).
+- regedit reopens the key it showed last (HKCU
+  `Software\Microsoft\Windows\CurrentVersion\Applets\Regedit`, value
+  `LastKey`, `programs/regedit/childwnd.c`), so the tests delete that
+  value before starting it.
 
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).
