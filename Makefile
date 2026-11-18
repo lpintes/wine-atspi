@@ -6,7 +6,12 @@ CFLAGS ?= -O2 -g -Wall
 WINEPREFIX ?= $(HOME)/.wine-atspi
 BUILD = build
 # Win32 modules use Wine's msvcrt headers, not glibc.
-WIN32_FLAGS = -mno-cygwin -mconsole
+# memset/memcpy/memmove bind to Wine's ms_abi ucrtbase, but calls that GCC
+# makes up itself (loop to memset, struct copy) use the sysv ABI and crash.
+# STRINGOP_FLAGS inline those; tests/abi-check.sh verifies the objects.
+STRINGOP_FLAGS = -fno-tree-loop-distribute-patterns -minline-all-stringops \
+	-mstringop-strategy=unrolled_loop
+WIN32_FLAGS = -mno-cygwin -mconsole $(STRINGOP_FLAGS)
 
 export WINEPREFIX
 
@@ -35,7 +40,22 @@ $(CORE_OBJS): $(BUILD)/%.o: bridge/%.c bridge/core.h bridge/bridge.h bridge/menu
 		bridge/utf16.h | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -c -o $@ $<
 
-$(BUILD)/wine-atspi.exe.so: $(CORE_OBJS) $(ATSPI_OBJS)
+# Lua for application scripts (third_party/lua), part of the Win32 core.
+# bridge/luauser.h adapts it to Winelib without touching its files.
+LUA = lapi lauxlib lbaselib lcode lcorolib lctype ldblib ldebug ldo ldump lfunc \
+	lgc linit liolib llex lmathlib lmem loadlib lobject lopcodes loslib lparser \
+	lstate lstring lstrlib ltable ltablib ltm lundump lutf8lib lvm lzio
+LUA_OBJS = $(LUA:%=$(BUILD)/lua/%.o)
+LUA_FLAGS = -Ibridge -Ithird_party/lua -DLUA_USER_H='"luauser.h"'
+
+$(BUILD)/lua:
+	mkdir -p $@
+
+$(LUA_OBJS): $(BUILD)/lua/%.o: third_party/lua/%.c bridge/luauser.h | $(BUILD)/lua
+	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) $(LUA_FLAGS) -c -o $@ $<
+
+$(BUILD)/wine-atspi.exe.so: $(CORE_OBJS) $(LUA_OBJS) $(ATSPI_OBJS)
+	sh tests/abi-check.sh $(CORE_OBJS) $(LUA_OBJS)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/wine-atspi.exe $^ $(GIO_LIBS) \
 		-loleacc -lole32 -loleaut32 -lshell32 -lntdll
 

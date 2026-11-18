@@ -775,6 +775,22 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
 - On x86_64 `va_list` is the ms_abi one. A variadic function that passes
   its `va_list` to Win32 (`wvsprintfW`) must be declared `WINAPIV`,
   otherwise it crashes.
+- Wine's msvcrt `<vadefs.h>` makes `va_list` the ms_abi one
+  (`__builtin_ms_va_list`) on x86_64, so `va_start` in an ordinary (sysv)
+  variadic function reads garbage. The embedded Lua crashed in
+  `luaO_pushvfstring`; `bridge/luauser.h` gives Lua GCC's sysv `va_list`,
+  which it passes to no msvcrt function.
+- `memset` / `memcpy` / `memmove` bind to Wine's ucrtbase (ms_abi). Calls
+  written in the source use the ms_abi declarations of `<string.h>` and
+  work, but calls GCC makes up itself (a loop turned into `memset`, a large
+  struct copy) use the sysv ABI and crash (Lua's `tablerehash`, 2026-11-18).
+  `STRINGOP_FLAGS` in the `Makefile` inline them for all winegcc code, and
+  `tests/abi-check.sh` fails the link on a sysv call (an ms_abi one sets
+  the size in `r8`). The same binding is a reason why `atspi.c` (host gcc)
+  must not call libc.
+- Lua raises errors with `__builtin_setjmp` / `__builtin_longjmp`
+  (`bridge/luauser.h`): Wine's x86_64 `longjmp` unwinds with SEH, which
+  need not work across ELF frames (not tested, avoided).
 - Wine's `libuuid` lacks `IID_IAccessible`; include `<initguid.h>` before
   `<oleacc.h>` in one source file.
 - `WINE_ATSPI_DEBUG=1` makes the bridge trace focus events and key checks
