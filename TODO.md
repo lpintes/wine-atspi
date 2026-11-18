@@ -52,13 +52,6 @@ Controls:
 - Menus: the `Edit` context menu (Shift+F10) is silent until the first
   arrow (`TPM_NONOTIFY`, nothing highlighted).
 
-Bridge:
-
-- Method calls get the node pointer from `subtree_dispatch`; a node freed
-  in between would dangle. Not seen. Idea: pass `app` and look the node
-  up by path in `method_call`. Unverified assumption: today GDBus method
-  idles outrank the bridge's idle sources, which is the only protection.
-
 ## 3. Later
 
 - Menus in 32-bit programs: a 32-bit hook DLL and a 32-bit process that

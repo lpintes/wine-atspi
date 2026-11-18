@@ -60,6 +60,7 @@ $(BUILD)/script.o: bridge/luauser.h third_party/lua/lua.h
 
 $(BUILD)/wine-atspi.exe.so: $(CORE_OBJS) $(LUA_OBJS) $(ATSPI_OBJS)
 	sh tests/abi-check.sh $(CORE_OBJS) $(LUA_OBJS)
+	sh tests/libc-check.sh $(ATSPI_OBJS)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/wine-atspi.exe $^ $(GIO_LIBS) \
 		-loleacc -lole32 -loleaut32 -lshell32 -lntdll
 

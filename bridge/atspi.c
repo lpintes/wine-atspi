@@ -1157,15 +1157,41 @@ static GVariant *component_method(struct node *node, const char *method, GVarian
     return NULL;
 }
 
+/*
+ * The node of a call, looked up by path at call time: GDBus runs the
+ * vtable from an idle source scheduled after subtree_dispatch, and the
+ * node may be freed in between. data is the app, which GDBus keeps
+ * alive while a call is pending (app_free is the subtree's destructor).
+ */
+static struct node *call_node(gpointer data, const char *path)
+{
+    struct app *app = data;
+
+    /*
+     * Parenthesized: with a constant prefix the g_str_has_prefix macro
+     * calls strlen and strncmp, which bind to Wine's ms_abi msvcrt.
+     */
+    if (!(g_str_has_prefix)(path, ATSPI_PREFIX "/"))
+        return NULL;
+    return g_hash_table_lookup(app->nodes, path + sizeof(ATSPI_PREFIX));
+}
+
 static void method_call(GDBusConnection *conn, const char *sender,
                         const char *path, const char *iface,
                         const char *method, GVariant *params,
                         GDBusMethodInvocation *inv, gpointer data)
 {
-    struct node *node = data;
+    struct node *node = call_node(data, path);
     GVariant *ret = NULL;
     guint i;
 
+    if (!node)
+    {
+        g_dbus_method_invocation_return_error(inv, G_DBUS_ERROR,
+                                              G_DBUS_ERROR_UNKNOWN_OBJECT,
+                                              "%s no longer exists", path);
+        return;
+    }
     if (!g_strcmp0(iface, IFACE_TEXT))
         ret = text_method(node, method, params);
     else if (!g_strcmp0(iface, IFACE_TABLE))
@@ -1281,8 +1307,14 @@ static GVariant *get_property(GDBusConnection *conn, const char *sender,
                               const char *path, const char *iface,
                               const char *prop, GError **error, gpointer data)
 {
-    struct node *node = data;
+    struct node *node = call_node(data, path);
 
+    if (!node)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_OBJECT,
+                    "%s no longer exists", path);
+        return NULL;
+    }
     if (!g_strcmp0(prop, "Name"))
         return g_variant_new_string(node->name ? node->name : "");
     if (!g_strcmp0(prop, "Description") || !g_strcmp0(prop, "Locale") ||
@@ -1343,11 +1375,11 @@ static gboolean set_property(GDBusConnection *conn, const char *sender,
                              const char *prop, GVariant *value,
                              GError **error, gpointer data)
 {
-    struct node *node = data;
+    struct app *app = data;
 
     if (!g_strcmp0(prop, "Id"))
     {
-        node->app->id = g_variant_get_int32(value);
+        app->id = g_variant_get_int32(value);
         return TRUE;
     }
     g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_PROPERTY_READ_ONLY,
@@ -1411,7 +1443,7 @@ static const GDBusInterfaceVTable *subtree_dispatch(GDBusConnection *conn,
         return NULL;
     if (!node_has_interface(node, iface))
         return NULL;
-    *out_data = node;
+    *out_data = app;
     return &vtable;
 }
 

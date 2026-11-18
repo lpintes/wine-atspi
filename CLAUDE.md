@@ -261,8 +261,19 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   name (Up in the Open dialog's file type combo refills the list), so
   `report_tree` drops it and tries again after 150 ms, up to 10 times.
 - `atspi.c` uses only GLib functions, never libc ones directly. The
-  binary imports msvcrt through Wine, and a libc name could bind to an
-  ms_abi msvcrt thunk. Not proven to break, just avoided.
+  binary imports msvcrt through Wine, and a libc name binds to an ms_abi
+  msvcrt function: GLib 2.90's `g_str_has_prefix` macro with a constant
+  prefix expands to `strlen` + `strncmp` and crashed the bridge with a
+  page fault (2026-11-18). Call such a function parenthesized,
+  `(g_str_has_prefix)(...)`. `tests/libc-check.sh` (run by `make`) fails
+  the link on any libc symbol in the AT-SPI objects.
+- GDBus runs a subtree's method and property callbacks from an idle
+  source scheduled after `subtree_dispatch`, so a node found there may
+  be freed before the call. `subtree_dispatch` hands over the `app`
+  (`app_free` is the subtree's destructor, and GLib 2.68+ refcounts an
+  exported subtree until its pending calls are done; from memory, not
+  checked in GLib's source) and `call_node` looks the node up by path at
+  call time; a gone node answers `UnknownObject`.
 
 Found with the bridge's autostart (`build/exp-autostart/`, prefix
 `~/.wine-atspi-exp`, Wine 11.21, 2026-11-07).
