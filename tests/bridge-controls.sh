@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run the bridge against tests/controls.c and log the AT-SPI events it emits.
-# Usage: tests/bridge-controls.sh [LOG]   (run from the repository root in WSL)
+# Usage: tests/bridge-controls.sh [LOG]   (from the repository root, or by tests/vm.sh)
 # The bridge's own stderr goes to build/bridge.log.
 
 set -u

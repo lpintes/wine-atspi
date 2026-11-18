@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run the bridge against tests/controls.c and notepad and dump the window
 # trees it builds for object navigation and flat review.
-# Usage: tests/bridge-tree.sh [LOG]   (run from the repository root in WSL)
+# Usage: tests/bridge-tree.sh [LOG]   (from the repository root, or by tests/vm.sh)
 # The bridge's own stderr goes to build/bridge.log.
 
 set -u

@@ -2,7 +2,7 @@
 # Run the bridge against Wine's regedit and dump its status bar, which
 # shows the path of the selected key and changes after each key in the
 # tree without a WinEvent.
-# Usage: tests/bridge-statusbar.sh [LOG]   (run from the repository root in WSL)
+# Usage: tests/bridge-statusbar.sh [LOG]   (from the repository root, or by tests/vm.sh)
 # The bridge's own stderr goes to build/bridge.log.
 
 set -u

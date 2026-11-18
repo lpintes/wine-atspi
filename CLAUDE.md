@@ -797,15 +797,22 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
   `bridge/textrange.c` on the AT-SPI side) build natively with the host
   gcc, no Wine and no window: `make check` in WSL (`tests/unit.c`).
   Code that needs no Windows API or D-Bus goes into such files.
-- **Quick tests in WSL** (Wine runs through WSLg). Verify automatically:
-  a `python-atspi` script dumps the AT-SPI tree and events and compares them
-  with expectations. Do not ask the user to listen to every iteration.
-  Controls missing from Wine's own programs are tested with
-  `tests/controls.c` (window class `WineAtspiControls`) and
-  `tests/bridge-controls.sh`.
-  A test window in WSLg takes the focus on the user's Windows desktop,
-  so keys the user types meanwhile reach the target. Unexpected keys
-  in a test log (seen: W, Left, Down) are such keys, not a bridge bug.
+- **Integration tests in the Arch VM**, not in WSLg: a test window in
+  WSLg takes the focus on the user's Windows desktop, and keys the user
+  types meanwhile reach the target (seen: W, Left, Down in test logs).
+  The user starts the VM and logs in on its console and runs `run-mate`;
+  then from Git Bash `tests/vm.sh bridge-menu bridge-wordpad ...` copies
+  the repository and `build/` programs to `~/wine-atspi` in the VM,
+  stops Orca (unless `--orca`), runs the tests in the MATE session's
+  display and D-Bus and fetches the logs to `build/vm/`. `--no-copy`
+  skips the copy. Verify automatically: a `python-atspi` script dumps
+  the AT-SPI tree and events and compares them with expectations; most
+  tests only log, so read the log. Do not ask the user to listen to
+  every iteration. Window sizes differ from WSLg (notepad 760x570), so
+  extents and visible lines do too. Controls missing from Wine's own
+  programs are tested with `tests/controls.c` (window class
+  `WineAtspiControls`) and `tests/bridge-controls.sh`. The test scripts
+  still run in WSL as well.
 - **Tests with Orca in the Arch image** `C:\linux\arch.img`. Its build
   scripts and rules are in `C:\Users\pintes\pokus\archfile` (read its
   `CLAUDE.md` before touching the image).

@@ -3,7 +3,7 @@
 # lines, more than fit, and dump each line's range rect, as Orca's flat
 # review asks for it: visible lines inside the text's rect, lines scrolled
 # out far above (y about -100000) or below (about 100000) the window.
-# Usage: tests/bridge-text-extents.sh [LOG]   (run from the repository root in WSL)
+# Usage: tests/bridge-text-extents.sh [LOG]   (from the repository root, or by tests/vm.sh)
 # The bridge's own stderr goes to build/bridge.log.
 
 set -u

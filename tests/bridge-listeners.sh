@@ -2,7 +2,7 @@
 # The bridge must watch the programs only while an AT-SPI client listens
 # to events: no hooks and no application at start, hooks and the focused
 # notepad once a listener registers, nothing again when it is gone.
-# Usage: tests/bridge-listeners.sh [LOG]   (run from the repository root in WSL)
+# Usage: tests/bridge-listeners.sh [LOG]   (from the repository root, or by tests/vm.sh)
 # Prints one PASS or FAIL line per check; exits 1 if any failed.
 
 set -u

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run the bridge against Wine's notepad and log the AT-SPI events of its
 # menus, reported by the menu hook DLL (build/wine-atspi-hook.dll).
-# Usage: tests/bridge-menu.sh [LOG]   (run from the repository root in WSL)
+# Usage: tests/bridge-menu.sh [LOG]   (from the repository root, or by tests/vm.sh)
 # The bridge's own stderr goes to build/bridge.log.
 
 set -u

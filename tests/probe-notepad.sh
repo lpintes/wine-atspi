@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run the probe against Wine's notepad and drive it with sendkeys.
-# Usage: tests/probe-notepad.sh [LOG]   (run from the repository root in WSL)
+# Usage: tests/probe-notepad.sh [LOG]   (from the repository root, or by tests/vm.sh)
 
 set -u
 export WINEPREFIX=${WINEPREFIX:-$HOME/.wine-atspi}
