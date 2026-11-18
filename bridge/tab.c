@@ -70,6 +70,7 @@ static BOOL describe_tab_item_in(HWND hwnd, struct remote *r, int item,
     if (send_message(hwnd, TCM_GETCURSEL, 0, 0, SEND_TIMEOUT_MS, &selected) &&
         (int)selected == item)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    clip_item_showing(hwnd, obj);
     send_message(hwnd, TCM_GETITEMCOUNT, 0, 0, SEND_TIMEOUT_MS, &count);
     obj->position = item + 1;
     obj->set_size = (int)count;

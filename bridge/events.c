@@ -416,6 +416,11 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
  * (default.py, _on_value_changed). Wine's comctl32 notifies
  * EVENT_OBJECT_VALUECHANGE for it; other controls' value changes come
  * with the key check of the focused object.
+ *
+ * The scroll bar of a window notifies it too (OBJID_VSCROLL, OBJID_HSCROLL;
+ * SetScrollInfo in win32u/scroll.c): a list scrolled by the mouse wheel,
+ * the scroll bar or a key that keeps the focus shows other items, which
+ * are read again.
  */
 static void on_value_change(HWND hwnd, LONG id_object, LONG id_child)
 {
@@ -425,6 +430,12 @@ static void on_value_change(HWND hwnd, LONG id_object, LONG id_child)
     HWND top;
     DWORD pid = 0;
 
+    if ((id_object == OBJID_VSCROLL || id_object == OBJID_HSCROLL) &&
+        GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) && find_item_handler(cls))
+    {
+        schedule_items(hwnd);
+        return;
+    }
     if (id_object != OBJID_CLIENT || id_child != CHILDID_SELF ||
         !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"msctls_progress32") ||
         !IsWindowVisible(hwnd))

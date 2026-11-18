@@ -651,6 +651,20 @@ Found with regedit's tree (`tests/perf-tree.sh` in the VM, 2026-11-18).
   costs 6-7 messages and 11 ms, a tree of 28 items 122 messages and
   90-150 ms, Page Down at most one page of steps. The focus trace shows
   the messages, time and place of each focus.
+- Ctrl+arrows, Ctrl+Page keys and Ctrl+Home / End scroll a tree view
+  without moving the selection (`TREEVIEW_KeyDown` in
+  `comctl32/treeview.c`), and `TVM_GETITEMRECT` fails for an item
+  scrolled away. `LB_GETITEMRECT` and `LVM_GETITEMRECT` give a rect
+  outside the client area instead. The window tree has only the items in
+  view, so the focused item that leaves it stays below its control but
+  loses `showing` and its rect (`tree_idle`); an item described outside
+  its control's client area gets no `showing` (`clip_item_showing`).
+  `SetScrollInfo` notifies `EVENT_OBJECT_VALUECHANGE` with
+  `OBJID_VSCROLL` / `OBJID_HSCROLL` on the scrolled window
+  (`win32u/scroll.c`), which refreshes the items of a list, tree or tab
+  control after a mouse wheel too (`on_value_change`; the wheel itself
+  not tested). Checked in `tests/bridge-tree.sh` (regedit Ctrl+End and
+  Ctrl+Home, 2026-11-18).
 
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).

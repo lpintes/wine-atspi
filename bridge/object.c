@@ -239,6 +239,28 @@ void set_item_extents(HWND hwnd, RECT rect, struct bridge_object *obj)
     obj->height = r[3];
 }
 
+/*
+ * Drops showing from an item of list hwnd that has no rectangle or lies
+ * outside the list's client area: scrolled away by the mouse wheel or by
+ * a key that keeps the focus (Ctrl+Page Down in a tree view). Orca's flat
+ * review skips objects that are not showing (ax_utilities.py,
+ * is_on_screen). Call it after the states are set.
+ */
+void clip_item_showing(HWND hwnd, struct bridge_object *obj)
+{
+    RECT client, item;
+
+    if (obj->has_extents)
+    {
+        GetClientRect(hwnd, &client);
+        MapWindowPoints(hwnd, HWND_DESKTOP, (POINT *)&client, 2);
+        SetRect(&item, obj->x, obj->y, obj->x + obj->width, obj->y + obj->height);
+        if (IntersectRect(&item, &item, &client))
+            return;
+    }
+    obj->states &= ~BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
+}
+
 /* MSAA only says "text"; the window style tells entry from multi-line. */
 static void refine_text(HWND hwnd, LONG msaa_state, struct bridge_object *obj)
 {

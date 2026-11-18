@@ -233,6 +233,7 @@ static BOOL describe_listview_item_in(HWND hwnd, struct remote *r, struct listvi
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSED);
     if (state & LVIS_SELECTED)
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED);
+    clip_item_showing(hwnd, obj);
     obj->position = item + 1;
     obj->set_size = (int)info->count;
     return TRUE;

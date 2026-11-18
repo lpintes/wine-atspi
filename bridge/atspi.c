@@ -1777,11 +1777,12 @@ static void set_range(struct node *node, const struct bridge_object *obj, gboole
  * Screen rectangle. An object described without one (a list item) keeps
  * the last known, so the Component interface does not come and go.
  */
+/* An object without a rectangle (a tree item scrolled away) drops its old one. */
 static void set_extents(struct node *node, const struct bridge_object *obj)
 {
+    node->has_extents = obj->has_extents;
     if (!obj->has_extents)
         return;
-    node->has_extents = TRUE;
     node->x = obj->x;
     node->y = obj->y;
     node->width = obj->width;
@@ -2241,17 +2242,30 @@ static gboolean tree_idle(gpointer data)
     /*
      * Tree nodes have tree nodes or the frame as parents, so none is freed
      * here. An item scrolled away leaves too, but not the focused one: the
-     * focus stays where it is. A tree without items keeps the items of a
-     * control that stays (items have the hwnd of their control).
+     * focus stays where it is, no longer showing and without its old
+     * rectangle (the tree has the items in view only). A tree without items
+     * keeps the items of a control that stays (items have the hwnd of their
+     * control).
      */
     for (j = 0; j < old->len; j++)
     {
+        gboolean item;
+
         node = g_hash_table_lookup(app->nodes, old->pdata[j]);
-        if (!node || node->in_tree || node == focused)
+        if (!node || node->in_tree)
             continue;
-        if (t->no_items && node->parent && node->parent != frame && node->parent->in_tree &&
-            node->hwnd == node->parent->hwnd)
+        item = node->parent && node->parent != frame && node->parent->in_tree &&
+               node->hwnd == node->parent->hwnd;
+        if (t->no_items && item)
             node->in_tree = TRUE;
+        else if (node == focused)
+        {
+            if (item)
+            {
+                set_state(node, BRIDGE_STATE_SHOWING, FALSE);
+                node->has_extents = FALSE;
+            }
+        }
         else
             node_remove(node);
     }

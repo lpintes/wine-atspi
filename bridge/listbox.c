@@ -154,6 +154,7 @@ static int describe_listbox_item(HWND hwnd, int item, struct bridge_object *obj,
     if (send_message(hwnd, LB_GETITEMRECT, item, (LPARAM)&rect,
                      SEND_TIMEOUT_MS, &ret) && (LONG)ret != LB_ERR)
         set_item_extents(hwnd, rect, obj);
+    clip_item_showing(hwnd, obj);
     obj->position = item + 1;
     obj->set_size = (int)count;
     script_describe(obj, str);

@@ -74,6 +74,26 @@ timeout 10 wine $BUILD/sendkeys.exe.so k:escape w:1500
 } >> "$LOG" 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so f:Notepad w:500 k:alt+f4 w:2000
 
+# regedit: the first subkey of HKEY_CLASSES_ROOT focused, then Ctrl+End
+# scrolls the tree to its end without moving the focus. The focused item
+# stays, not showing and without its old rect; Ctrl+Home brings it back
+# with a rect. Only the focused object and the first item lines are kept.
+wine regedit &
+sleep 3
+timeout 20 wine $BUILD/sendkeys.exe.so f:RegEdit_RegEdit w:1000 k:down w:1000 \
+    k:right w:3000 k:right w:1000
+for step in "first subkey focused:" "Ctrl+End:k:ctrl+end" "Ctrl+Home:k:ctrl+home"; do
+    name=${step%%:*} keys=${step#*:}
+    [ -n "$keys" ] && timeout 10 wine $BUILD/sendkeys.exe.so f:RegEdit_RegEdit w:500 $keys w:1500
+    {
+        echo "--- regedit, $name"
+        python3 tests/atspi-dump.py -v regedit > $BUILD/regedit-dump.txt
+        grep -a ' focused' $BUILD/regedit-dump.txt
+        grep -a 'tree item' $BUILD/regedit-dump.txt | head -2
+    } >> "$LOG" 2>&1
+done
+timeout 10 wine $BUILD/sendkeys.exe.so f:RegEdit_RegEdit w:500 k:alt+f4 w:2000
+
 kill $bridge
 wineserver -k
 wait

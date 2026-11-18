@@ -21,7 +21,6 @@ Window tree (object navigation, flat review):
 - `Action` for other objects than Win32 buttons (list items, tabs, combo
   boxes, toolbar buttons), if Orca's mouse click fallback is not good
   enough.
-- A focused item scrolled out of view keeps `showing` and its old rect.
 - On a new top-level window the tree is posted synchronously before the
   focus (up to about 80 ms delay before speech). Each child window costs
   about 6 ms to describe, mostly cross-process messages, not MSAA

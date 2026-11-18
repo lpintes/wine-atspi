@@ -287,6 +287,7 @@ static BOOL describe_treeview_item_in(HWND hwnd, struct remote *r, HTREEITEM ite
         obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_EXPANDABLE) |
                        BRIDGE_STATE_BIT((state & TVIS_EXPANDED) ? BRIDGE_STATE_EXPANDED
                                                                 : BRIDGE_STATE_COLLAPSED);
+    clip_item_showing(hwnd, obj);
 
     place_tree_item(hwnd, item, tree_next(hwnd, TVGN_PARENT, item), obj);
     return TRUE;

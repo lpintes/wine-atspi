@@ -242,6 +242,7 @@ unsigned int role_from_class(HWND hwnd, const WCHAR *cls);
 void get_extents(HWND hwnd, struct bridge_object *obj);
 void client_to_screen(HWND hwnd, RECT rect, int *out);
 void set_item_extents(HWND hwnd, RECT rect, struct bridge_object *obj);
+void clip_item_showing(HWND hwnd, struct bridge_object *obj);
 const struct item_handler *find_item_handler(const WCHAR *cls);
 BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
                      struct bridge_object *obj, struct focus_strings *str);
