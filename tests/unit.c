@@ -139,6 +139,72 @@ static void test_control_index(void)
     }
 }
 
+static void test_utf16_to_chars(void)
+{
+    static const utf16 lone[] = { 'a', 0xd800, 'b', 0xdc00, 0 };
+    unsigned int out[8];
+
+    CHECK_INT(utf16_to_chars(T(u"a\r\nb\rc"), 6, out), 5);
+    CHECK_INT(out[1], '\n');
+    CHECK_INT(out[3], '\r');
+    CHECK_INT(utf16_to_chars(T(u"a\U0001F600b"), 4, out), 3);
+    CHECK_INT(out[1], 0x1F600);
+    CHECK_INT(utf16_to_chars(lone, 4, out), 4);
+    CHECK_INT(out[1], 0xfffd);
+    CHECK_INT(out[3], 0xfffd);
+    CHECK_INT(utf16_to_chars(T(u"a\r\n"), 3, NULL), 2);
+}
+
+#define CHECK_CHANGE(old, new_text, e_start, e_removed, e_inserted) \
+    check_change(__LINE__, (old), (new_text), (e_start), (e_removed), (e_inserted))
+
+/*
+ * find_change gives the expected range, and converting the unchanged
+ * parts and the change on their own gives the code points of the new text.
+ */
+static void check_change(int line, const char16_t *old, const char16_t *new_text, int e_start,
+                         int e_removed, int e_inserted)
+{
+    int old_len = u16len(old), new_len = u16len(new_text), start, removed, inserted;
+    unsigned int whole[32], pieces[32];
+    int count, n;
+
+    find_change(T(old), old_len, T(new_text), new_len, &start, &removed, &inserted);
+    check_int(line, "start", start, e_start);
+    check_int(line, "removed", removed, e_removed);
+    check_int(line, "inserted", inserted, e_inserted);
+    count = utf16_to_chars(T(new_text), new_len, whole);
+    n = utf16_to_chars(T(new_text), start, pieces);
+    n += utf16_to_chars(T(new_text) + start, inserted, pieces + n);
+    n += utf16_to_chars(T(old) + start + removed, old_len - start - removed, pieces + n);
+    check_int(line, "pieces", n, count);
+    check_int(line, "same code points", !memcmp(whole, pieces, count * sizeof(*whole)), 1);
+    /* The prefix gives the same code points in both texts. */
+    check_int(line, "prefix", utf16_to_chars(T(old), start, NULL),
+              utf16_to_chars(T(new_text), start, NULL));
+}
+
+static void test_find_change(void)
+{
+    CHECK_CHANGE(u"abc", u"abXc", 2, 0, 1);
+    CHECK_CHANGE(u"abc", u"ac", 1, 1, 0);
+    CHECK_CHANGE(u"abc", u"abc", 3, 0, 0);
+    CHECK_CHANGE(u"", u"ab", 0, 0, 2);
+    CHECK_CHANGE(u"ab", u"", 0, 2, 0);
+    /* Return typed at the end of a line, and removed again. */
+    CHECK_CHANGE(u"ab\r\ncd", u"ab\r\n\r\ncd", 4, 0, 2);
+    CHECK_CHANGE(u"ab\r\n\r\ncd", u"ab\r\ncd", 4, 2, 0);
+    /* "\r" turned into "\r\n": the "\r" is part of the change. */
+    CHECK_CHANGE(u"a\rb", u"a\r\nb", 1, 1, 2);
+    CHECK_CHANGE(u"a\r\nb", u"a\rb", 1, 2, 1);
+    /* "\n" after a "\r" that stays. */
+    CHECK_CHANGE(u"a\r", u"a\r\n", 1, 1, 2);
+    /* A surrogate pair is never cut. */
+    CHECK_CHANGE(u"a\U0001F600b", u"a\U0001F601b", 1, 2, 2);
+    CHECK_CHANGE(u"a\U0001F600", u"a\U0001F600x", 3, 0, 1);
+    CHECK_CHANGE(u"\U0001F600", u"x\U0001F600", 0, 0, 1);
+}
+
 static void test_strip_ampersands(void)
 {
     char16_t a[] = u"&Open", b[] = u"Save && Exit", c[] = u"a&", d[] = u"&&&x", e[] = u"";
@@ -227,6 +293,8 @@ int main(void)
     test_char_offset();
     test_rich_text_index();
     test_control_index();
+    test_utf16_to_chars();
+    test_find_change();
     test_strip_ampersands();
     test_split_menu_text();
     test_text_range();

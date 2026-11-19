@@ -63,7 +63,7 @@ struct focus_strings
     int selected_rows[MAX_SELECTED_ROWS];
     char labels[MAX_LABELS][LABEL_MAX_UTF8];
     struct bridge_object label_objects[MAX_LABELS];
-    char *text;     /* heap, see free_strings */
+    struct bridge_text *text;   /* a reference, see free_strings */
 };
 
 /* Room for the structure in front of the text in the target. */
@@ -263,6 +263,7 @@ void describe_range(HWND hwnd, const WCHAR *cls, struct bridge_object *obj);
 void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
                         struct focus_strings *str);
 BOOL has_edit_text(const WCHAR *cls);
+struct bridge_text *new_text(const WCHAR *src, int len);
 
 /* labels.c */
 BOOL needs_label(unsigned int role);

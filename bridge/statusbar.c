@@ -108,10 +108,9 @@ void report_status_bar(HWND top)
     lstrcpyW(last_status.text, text);
 
     memset(&change, 0, sizeof(change));
-    str.text = HeapAlloc(GetProcessHeap(), 0, STATUS_TEXT_MAX * 3);
+    str.text = new_text(text, lstrlenW(text));
     if (!str.text)
         return;
-    to_utf8(text, str.text, STATUS_TEXT_MAX * 3);
     describe_frame(top, &change.frame, &str);
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->role = BRIDGE_ROLE_STATUS_BAR;

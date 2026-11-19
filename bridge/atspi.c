@@ -417,8 +417,9 @@ struct node
     char *window_class;
     char *shortcut;         /* accelerator of a menu item, or NULL */
     guint64 hwnd;           /* window of the object, 0 for the root and placeholders */
-    /* Text interface; chars is NULL for nodes without one. */
-    gunichar *chars;
+    /* Text interface: text and its chars are NULL for nodes without one. */
+    struct bridge_text *text;
+    const gunichar *chars;
     glong count;
     gint caret;
     gint selection_start;
@@ -1572,7 +1573,7 @@ static void node_free(struct node *node)
     g_free(node->value);
     g_free(node->window_class);
     g_free(node->shortcut);
-    g_free(node->chars);
+    bridge_text_unref(node->text);
     g_strfreev(node->headers);
     g_free(node->selected_rows);
     g_free(node);
@@ -1787,35 +1788,51 @@ static void emit_text_changed(struct node *node, const char *detail, gint start,
 }
 
 /*
- * Copies the text, caret and selection of obj into node. With announce,
- * a changed text goes out as one delete and one insert of the differing
- * middle part, then caret and selection events, in the order GTK uses.
+ * Takes the text, caret and selection of obj into node. With announce, a
+ * changed text goes out as one delete and one insert of the changed part,
+ * then caret and selection events, in the order GTK uses. A text made
+ * from the node's one tells that part; else the differing middle part is
+ * looked for.
  */
 static void set_text(struct node *node, const struct bridge_object *obj, gboolean announce)
 {
-    glong count;
-    gunichar *chars = g_utf8_to_ucs4_fast(obj->text, -1, &count);
-    gint prefix = 0, suffix = 0, old_caret = node->caret;
+    struct bridge_text *text = obj->text;
+    const gunichar *chars = text->chars;
+    glong count = text->count;
+    gint prefix = 0, removed = 0, inserted = 0, suffix = 0, old_caret = node->caret;
     gboolean had_selection = node->selection_start != node->selection_end;
     gboolean has_selection = obj->selection_start != obj->selection_end;
     gboolean selection_changed;
 
-    if (!node->chars)
+    if (!node->text)
         announce = FALSE;
-    if (announce)
+    if (announce && text != node->text)
     {
-        while (prefix < count && prefix < node->count && chars[prefix] == node->chars[prefix])
-            prefix++;
-        while (suffix < count - prefix && suffix < node->count - prefix &&
-               chars[count - 1 - suffix] == node->chars[node->count - 1 - suffix])
-            suffix++;
-        emit_text_changed(node, "delete", prefix, node->count - prefix - suffix);
+        if (text->base == node->text->id)
+        {
+            prefix = text->start;
+            removed = text->removed;
+            inserted = text->inserted;
+        }
+        else
+        {
+            while (prefix < count && prefix < node->count && chars[prefix] == node->chars[prefix])
+                prefix++;
+            while (suffix < count - prefix && suffix < node->count - prefix &&
+                   chars[count - 1 - suffix] == node->chars[node->count - 1 - suffix])
+                suffix++;
+            removed = node->count - prefix - suffix;
+            inserted = count - prefix - suffix;
+        }
+        emit_text_changed(node, "delete", prefix, removed);
     }
-    g_free(node->chars);
+    bridge_text_ref(text);
+    bridge_text_unref(node->text);
+    node->text = text;
     node->chars = chars;
     node->count = count;
     if (announce)
-        emit_text_changed(node, "insert", prefix, count - prefix - suffix);
+        emit_text_changed(node, "insert", prefix, inserted);
 
     node->caret = CLAMP(obj->caret, 0, count);
     selection_changed = (had_selection || has_selection) &&
@@ -2492,7 +2509,7 @@ static void free_object(struct bridge_object *obj)
     g_free((char *)obj->value);
     g_free((char *)obj->window_class);
     g_free((char *)obj->shortcut);
-    g_free((char *)obj->text);
+    bridge_text_unref(obj->text);
     g_strfreev((char **)obj->columns);
     g_free((int *)obj->column_extents);
     g_free((int *)obj->selected_rows);
@@ -2531,7 +2548,7 @@ static void copy_object(struct bridge_object *dst, const struct bridge_object *s
     dst->value = g_strdup(src->value);
     dst->window_class = g_strdup(src->window_class);
     dst->shortcut = g_strdup(src->shortcut);
-    dst->text = g_strdup(src->text);
+    bridge_text_ref(dst->text);
     dst->columns = NULL;
     if (src->column_count > 0)
     {

@@ -30,22 +30,112 @@ static BOOL caret_at_start(HWND hwnd, DWORD start)
     return (short)LOWORD(pos) == gti.rcCaret.left && (short)HIWORD(pos) == gti.rcCaret.top;
 }
 
-/* Texts of windows as the hook DLL handed them over last (hook_text). */
+C_ASSERT(sizeof(LONG) == sizeof(int));
+
+/* A new text of count code points with one reference; chars to be filled. */
+static struct bridge_text *alloc_text(int count)
+{
+    static LONG last_id;
+    struct bridge_text *text;
+
+    text = HeapAlloc(GetProcessHeap(), 0, sizeof(*text) + ((SIZE_T)count + 1) * sizeof(text->chars[0]));
+    if (!text)
+        return NULL;
+    text->refs = 1;
+    while (!(text->id = InterlockedIncrement(&last_id)))
+        ;
+    text->base = 0;
+    text->start = text->removed = text->inserted = 0;
+    text->count = count;
+    text->chars[count] = 0;
+    return text;
+}
+
+void bridge_text_ref(struct bridge_text *text)
+{
+    if (text)
+        InterlockedIncrement((LONG *)&text->refs);
+}
+
+void bridge_text_unref(struct bridge_text *text)
+{
+    if (text && !InterlockedDecrement((LONG *)&text->refs))
+        HeapFree(GetProcessHeap(), 0, text);
+}
+
+/* The code points of len units of src as a new text with one reference. */
+struct bridge_text *new_text(const WCHAR *src, int len)
+{
+    struct bridge_text *text = alloc_text(utf16_to_chars(src, len, NULL));
+
+    if (text)
+        utf16_to_chars(src, len, text->chars);
+    return text;
+}
+
+/* Like GTK, a password text shows one mask character for each one. */
+static void mask_chars(unsigned int *chars, int count)
+{
+    int i;
+
+    for (i = 0; i < count; i++)
+        chars[i] = '*';
+}
+
+/*
+ * old, the code points of control text old_text, with the units
+ * [start, start + removed) replaced by the inserted units of new_text at
+ * start. The range must not cut a pair (align_change). Converts only the
+ * change, apart from counting the code points before it.
+ */
+static struct bridge_text *changed_text(const struct bridge_text *old, const WCHAR *old_text,
+                                        const WCHAR *new_text, int start, int removed,
+                                        int inserted, BOOL masked)
+{
+    int char_start = utf16_to_chars(new_text, start, NULL);
+    int char_removed = utf16_to_chars(old_text + start, removed, NULL);
+    int char_inserted = utf16_to_chars(new_text + start, inserted, NULL);
+    int rest = old->count - char_start - char_removed;
+    struct bridge_text *text;
+
+    if (rest < 0 || !(text = alloc_text(char_start + char_inserted + rest)))
+        return NULL;
+    memcpy(text->chars, old->chars, char_start * sizeof(text->chars[0]));
+    utf16_to_chars(new_text + start, inserted, text->chars + char_start);
+    if (masked)
+        mask_chars(text->chars + char_start, char_inserted);
+    memcpy(text->chars + char_start + char_inserted, old->chars + char_start + char_removed,
+           rest * sizeof(text->chars[0]));
+    text->base = old->id;
+    text->start = char_start;
+    text->removed = char_removed;
+    text->inserted = char_inserted;
+    return text;
+}
+
+/*
+ * Texts of windows as the bridge read them last: the control's own text
+ * (UTF-16 with "\r\n") and the code points made of it, so that the next
+ * read converts only the change (describe_edit_text).
+ */
 #define MAX_TEXT_COPIES 4
 
 static struct text_copy
 {
     HWND hwnd;
     DWORD pid;
-    UINT64 generation;
+    UINT64 generation;          /* of the hook DLL's copy; 0 if read without the hook */
     WCHAR *text;
     UINT32 length;
+    BOOL masked;                /* chars has a mask character for each one */
+    struct bridge_text *chars;  /* one reference */
     DWORD used;
 } copies[MAX_TEXT_COPIES];
 
 static void free_copy(struct text_copy *copy)
 {
     HeapFree(GetProcessHeap(), 0, copy->text);
+    bridge_text_unref(copy->chars);
     memset(copy, 0, sizeof(*copy));
 }
 
@@ -91,27 +181,29 @@ static BOOL read_remote(HANDLE process, const char *addr, char *buf, SIZE_T size
 
 /*
  * Text of hwnd read by the hook DLL inside the target (TEXT_MESSAGE in
- * wahook.h): only the change against the bridge's copy crosses the
- * process. Returns a heap copy of the text of *len units and the EM_GETSEL
- * range, or NULL without the hook (32-bit target) or on an error.
+ * wahook.h): only the change against copy, the bridge's copy of hwnd,
+ * crosses the process. Returns the text of *len units, which is
+ * copy->text if nothing changed and else a new heap block, with its
+ * *generation, the EM_GETSEL range and the change: *removed units at
+ * *start of copy->text were replaced by *inserted ones, or *start is -1
+ * for a whole new text. Returns NULL without the hook (32-bit target) or
+ * on an error.
  */
-static WCHAR *hook_text(HWND hwnd, DWORD *len, DWORD *sel_start, DWORD *sel_end)
+static WCHAR *hook_text(HWND hwnd, struct text_copy *copy, DWORD *len, int *start,
+                        int *removed, int *inserted, UINT64 *generation, DWORD *sel_start,
+                        DWORD *sel_end)
 {
     static UINT message;
     struct text_request req;
-    struct text_copy *copy;
     struct remote r;
-    WCHAR *text = NULL, *result = NULL;
-    DWORD pid = 0;
+    WCHAR *text = NULL;
     DWORD_PTR ret;
     SIZE_T done;
 
     if (!message)
         message = RegisterWindowMessageW(TEXT_MESSAGE);
-    GetWindowThreadProcessId(hwnd, &pid);
     if (!message || !remote_open(hwnd, &r))
         return NULL;
-    copy = find_copy(hwnd, pid);
     memset(&req, 0, sizeof(req));
     req.tag = TEXT_REQUEST_TAG;
     req.generation = copy->hwnd ? copy->generation : 0;
@@ -124,7 +216,7 @@ static WCHAR *hook_text(HWND hwnd, DWORD *len, DWORD *sel_start, DWORD *sel_end)
         goto done;
     }
     if (!(req.flags & TEXT_REPLY_FULL) &&
-        (!copy->hwnd || req.start > copy->length || req.removed > copy->length - req.start ||
+        (!copy->text || req.start > copy->length || req.removed > copy->length - req.start ||
          req.length != copy->length - req.removed + req.inserted))
     {
         /* Not the change of our copy; ask for the whole text next time. */
@@ -145,6 +237,7 @@ static WCHAR *hook_text(HWND hwnd, DWORD *len, DWORD *sel_start, DWORD *sel_end)
                          (SIZE_T)req.inserted * sizeof(WCHAR)))
         {
             HeapFree(GetProcessHeap(), 0, text);
+            text = NULL;
             free_copy(copy);
             goto done;
         }
@@ -152,55 +245,90 @@ static WCHAR *hook_text(HWND hwnd, DWORD *len, DWORD *sel_start, DWORD *sel_end)
             memcpy(text + req.start + req.inserted, copy->text + req.start + req.removed,
                    (req.length - req.start - req.inserted) * sizeof(WCHAR));
         text[req.length] = 0;
-        HeapFree(GetProcessHeap(), 0, copy->text);
-        copy->text = text;
     }
-    copy->hwnd = hwnd;
-    copy->pid = pid;
-    copy->generation = req.generation;
-    copy->length = req.length;
-    copy->used = GetTickCount();
-    if ((result = HeapAlloc(GetProcessHeap(), 0, ((SIZE_T)req.length + 1) * sizeof(WCHAR))))
-    {
-        memcpy(result, text, ((SIZE_T)req.length + 1) * sizeof(WCHAR));
-        *len = req.length;
-        *sel_start = req.sel_start;
-        *sel_end = req.sel_end;
-    }
+    *len = req.length;
+    *start = (req.flags & TEXT_REPLY_FULL) ? -1 : (int)req.start;
+    *removed = req.removed;
+    *inserted = req.inserted;
+    *generation = req.generation;
+    *sel_start = req.sel_start;
+    *sel_end = req.sel_end;
     trace(L"text: hook %lu units, %lu removed and %lu inserted at %lu%s", req.length,
           req.removed, req.inserted, req.start, (req.flags & TEXT_REPLY_FULL) ? L" (full)" : L"");
 done:
     remote_close(&r);
-    return result;
+    return text;
 }
 
-/* Text, caret and selection of an Edit or RichEdit; str->text owns the text. */
-void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
-                               struct focus_strings *str)
+/*
+ * Text of hwnd by a cross-process WM_GETTEXT, cut at TEXT_MAX_CHARS, as a
+ * heap block of *len units, and the EM_GETSEL range. NULL on an error.
+ */
+static WCHAR *message_text(HWND hwnd, DWORD *len, DWORD *sel_start, DWORD *sel_end)
 {
-    DWORD_PTR len = 0;
-    DWORD start = 0, end = 0, start_index, end_index, hook_len;
-    WCHAR *buf, *src, *dst;
-    int size, i, n;
+    DWORD_PTR n = 0;
+    WCHAR *buf;
 
-    if ((buf = hook_text(hwnd, &hook_len, &start, &end)))
-        n = hook_len;
-    else
+    if (!send_message(hwnd, WM_GETTEXTLENGTH, 0, 0, SEND_TIMEOUT_MS, &n))
+        return NULL;
+    if (n > TEXT_MAX_CHARS)
+        n = TEXT_MAX_CHARS;
+    if (!(buf = HeapAlloc(GetProcessHeap(), 0, (n + 1) * sizeof(WCHAR))))
+        return NULL;
+    if (!send_message(hwnd, WM_GETTEXT, n + 1, (LPARAM)buf, SEND_TIMEOUT_MS, &n))
+        n = 0;
+    buf[n] = 0;
+    *len = n;
+    /* Pointer arguments of EM_GETSEL are marshalled like on Windows. */
+    send_message(hwnd, EM_GETSEL, (WPARAM)sel_start, (LPARAM)sel_end, SEND_TIMEOUT_MS, NULL);
+    return buf;
+}
+
+/*
+ * Text, caret and selection of an Edit or RichEdit; str->text holds the
+ * reference to obj->text. The bridge keeps the last text of the window,
+ * so that only a change is read and converted, and the new text tells the
+ * AT-SPI side what changed against the one before.
+ */
+void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
+                        struct focus_strings *str)
+{
+    DWORD start = 0, end = 0, start_index, end_index, pid = 0, n = 0;
+    BOOL masked = obj->role == BRIDGE_ROLE_PASSWORD_TEXT;
+    int change = -1, removed = 0, inserted = 0;
+    struct bridge_text *chars = NULL;
+    struct text_copy *copy;
+    UINT64 generation = 0;
+    WCHAR *buf;
+
+    GetWindowThreadProcessId(hwnd, &pid);
+    copy = find_copy(hwnd, pid);
+    if (copy->hwnd && copy->masked != masked)
+        free_copy(copy);
+    if ((buf = hook_text(hwnd, copy, &n, &change, &removed, &inserted, &generation, &start,
+                         &end)))
     {
-        if (!send_message(hwnd, WM_GETTEXTLENGTH, 0, 0, SEND_TIMEOUT_MS, &len))
-            return;
-        if (len > TEXT_MAX_CHARS)
-            len = TEXT_MAX_CHARS;
-        buf = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
-        if (!buf)
-            return;
-        if (!send_message(hwnd, WM_GETTEXT, len + 1, (LPARAM)buf, SEND_TIMEOUT_MS, &len))
-            len = 0;
-        buf[len] = 0;
-        n = len;
-        /* Pointer arguments of EM_GETSEL are marshalled like on Windows. */
-        send_message(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end, SEND_TIMEOUT_MS, NULL);
+        if (change >= 0 && (removed || inserted))
+            align_change(copy->text, copy->length, buf, n, &change, &removed, &inserted);
     }
+    else if ((buf = message_text(hwnd, &n, &start, &end)))
+    {
+        if (copy->text)
+            find_change(copy->text, copy->length, buf, n, &change, &removed, &inserted);
+    }
+    else
+        return;
+
+    if (change >= 0 && copy->chars && !removed && !inserted)
+    {
+        chars = copy->chars;
+        bridge_text_ref(chars);
+    }
+    else if (change >= 0 && copy->chars)
+        chars = changed_text(copy->chars, copy->text, buf, change, removed, inserted, masked);
+    if (!chars && (chars = new_text(buf, n)) && masked)
+        mask_chars(chars->chars, chars->count);
+
     start_index = rich ? rich_text_index(buf, n, start) : start;
     end_index = rich ? rich_text_index(buf, n, end) : end;
     obj->selection_start = char_offset(buf, n, start_index);
@@ -208,25 +336,27 @@ void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
     obj->caret = start != end && caret_at_start(hwnd, start)
                      ? obj->selection_start : obj->selection_end;
 
-    if (obj->role == BRIDGE_ROLE_PASSWORD_TEXT)
+    if (buf != copy->text)
     {
-        /* Like GTK, show the hidden text as one mask character each. */
-        for (i = 0; i < n; i++)
-            buf[i] = '*';
+        HeapFree(GetProcessHeap(), 0, copy->text);
+        copy->text = buf;
     }
-    for (src = dst = buf; *src; src++)
-        if (src[0] != '\r' || src[1] != '\n')
-            *dst++ = *src;
-    *dst = 0;
-    size = WideCharToMultiByte(CP_UTF8, 0, buf, -1, NULL, 0, NULL, NULL);
-    str->text = HeapAlloc(GetProcessHeap(), 0, size > 0 ? size : 1);
-    if (str->text)
+    bridge_text_unref(copy->chars);
+    copy->chars = chars;
+    if (!chars)
     {
-        str->text[0] = 0;
-        WideCharToMultiByte(CP_UTF8, 0, buf, -1, str->text, size, NULL, NULL);
-        obj->text = str->text;
+        free_copy(copy);
+        return;
     }
-    HeapFree(GetProcessHeap(), 0, buf);
+    bridge_text_ref(chars);
+    copy->hwnd = hwnd;
+    copy->pid = pid;
+    copy->generation = generation;
+    copy->length = n;
+    copy->masked = masked;
+    copy->used = GetTickCount();
+    str->text = chars;
+    obj->text = chars;
 }
 
 BOOL has_edit_text(const WCHAR *cls)

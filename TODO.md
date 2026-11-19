@@ -37,15 +37,13 @@ Toolbars:
 
 Controls:
 
-- `Edit` / RichEdit: large texts (books) are slow. The hook DLL hands
-  over only the changed range (`hook_text`), but the core still strips
-  `\r\n`, converts to UTF-8 and counts characters over the whole text,
-  and the AT-SPI side converts and diffs it all (about 25 ms per MB per
-  key and caret move, `tests/perf-text.sh`). Next: the core keeps its
-  UTF-16 copy and sends the AT-SPI side the change (start, deleted,
-  inserted) instead of the whole text; keep the remote block per
-  window, since small texts got slower. 32-bit targets (no hook) are
-  still cut at `TEXT_MAX_CHARS`.
+- `Edit` / RichEdit: large texts (books). Only the change crosses to
+  the core and on to the AT-SPI side, but each key still costs about
+  12 ms per MB (hook reads and compares the whole text in the target,
+  `char_offset` of the caret, a copy of the code points on a change;
+  `tests/perf-text.sh`). Next: keep the remote block per window, since
+  small texts got slower (10 KB 8-9 ms, 5-8 ms before the hook).
+  32-bit targets (no hook) are still cut at `TEXT_MAX_CHARS`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
 - Tabs: `TCS_BUTTONS` untested.
 - 32-bit targets: a cross-process message costs about twice as much

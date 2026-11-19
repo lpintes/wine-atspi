@@ -36,6 +36,88 @@ int char_offset(const utf16 *text, int len, int pos)
 }
 
 /*
+ * Code points of len units of text as the AT-SPI side holds them, written
+ * to out unless it is NULL: "\r\n" becomes "\n", a surrogate pair one code
+ * point, a lone surrogate U+FFFD. Returns their number, which is
+ * char_offset(text, len, len).
+ */
+int utf16_to_chars(const utf16 *text, int len, unsigned int *out)
+{
+    int i, count = 0;
+    unsigned int c;
+
+    for (i = 0; i < len; i++)
+    {
+        c = text[i];
+        if (c == '\r' && i + 1 < len && text[i + 1] == '\n')
+            continue;
+        if (is_high_surrogate(c) && i + 1 < len && is_low_surrogate(text[i + 1]))
+        {
+            c = 0x10000 + ((c - 0xd800) << 10) + (text[i + 1] - 0xdc00);
+            i++;
+        }
+        else if (is_high_surrogate(c) || is_low_surrogate(c))
+            c = 0xfffd;
+        if (out)
+            out[count] = c;
+        count++;
+    }
+    return count;
+}
+
+/* Whether a cut at pos falls inside a "\r\n" or a surrogate pair. */
+static int splits_pair(const utf16 *text, int len, int pos)
+{
+    return pos > 0 && pos < len &&
+           ((text[pos - 1] == '\r' && text[pos] == '\n') ||
+            (is_high_surrogate(text[pos - 1]) && is_low_surrogate(text[pos])));
+}
+
+/*
+ * new_text is old with *removed units at *start replaced by *inserted
+ * units. Widens the change so that neither end cuts a "\r\n" or a
+ * surrogate pair in either text; then the unchanged parts convert to the
+ * same code points in both, and the change can be converted on its own.
+ */
+void align_change(const utf16 *old, int old_len, const utf16 *new_text, int new_len,
+                  int *start, int *removed, int *inserted)
+{
+    while (*start > 0 &&
+           (splits_pair(old, old_len, *start) || splits_pair(new_text, new_len, *start)))
+    {
+        (*start)--;
+        (*removed)++;
+        (*inserted)++;
+    }
+    while (splits_pair(old, old_len, *start + *removed) ||
+           splits_pair(new_text, new_len, *start + *inserted))
+    {
+        (*removed)++;
+        (*inserted)++;
+    }
+}
+
+/*
+ * The change from old to new_text as for align_change: the part between
+ * their common beginning and common end.
+ */
+void find_change(const utf16 *old, int old_len, const utf16 *new_text, int new_len,
+                 int *start, int *removed, int *inserted)
+{
+    int prefix = 0, suffix = 0;
+
+    while (prefix < old_len && prefix < new_len && old[prefix] == new_text[prefix])
+        prefix++;
+    while (suffix < old_len - prefix && suffix < new_len - prefix &&
+           old[old_len - 1 - suffix] == new_text[new_len - 1 - suffix])
+        suffix++;
+    *start = prefix;
+    *removed = old_len - prefix - suffix;
+    *inserted = new_len - prefix - suffix;
+    align_change(old, old_len, new_text, new_len, start, removed, inserted);
+}
+
+/*
  * A RichEdit (2.0 and later) ends a paragraph with one "\r" inside, so its
  * EM_GETSEL counts the "\r\n" that WM_GETTEXT gives as one character
  * (riched20/editor.c). Turn such a position into an index into text.

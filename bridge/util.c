@@ -47,7 +47,7 @@ void print_line(const WCHAR *text)
 
 void free_strings(struct focus_strings *str)
 {
-    HeapFree(GetProcessHeap(), 0, str->text);
+    bridge_text_unref(str->text);
     str->text = NULL;
 }
 

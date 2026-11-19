@@ -16,6 +16,11 @@ typedef unsigned short utf16;
 #endif
 
 int char_offset(const utf16 *text, int len, int pos);
+int utf16_to_chars(const utf16 *text, int len, unsigned int *out);
+void align_change(const utf16 *old, int old_len, const utf16 *new_text, int new_len,
+                  int *start, int *removed, int *inserted);
+void find_change(const utf16 *old, int old_len, const utf16 *new_text, int new_len,
+                 int *start, int *removed, int *inserted);
 int rich_text_index(const utf16 *text, int len, int pos);
 int control_index(const unsigned int *chars, int count, int offset, int rich);
 int control_offset(const unsigned int *chars, int count, int index, int rich);

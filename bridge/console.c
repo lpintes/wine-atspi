@@ -128,7 +128,7 @@ BOOL describe_console(HWND hwnd, struct bridge_object *obj, struct focus_strings
     WCHAR *cells = NULL, *buf = NULL;
     HANDLE out;
     DWORD read = 0;
-    int width = 0, rows = 0, cursor_row, y, len, pos = 0, end = 0, caret = 0, size;
+    int width = 0, rows = 0, cursor_row, y, len, pos = 0, end = 0, caret = 0;
     BOOL ok = FALSE;
 
     if (!attach_console_window(hwnd))
@@ -203,14 +203,8 @@ BOOL describe_console(HWND hwnd, struct bridge_object *obj, struct focus_strings
     obj->name = str->object;
     obj->value = NULL;
     obj->caret = obj->selection_start = obj->selection_end = char_offset(buf, end, caret);
-    size = WideCharToMultiByte(CP_UTF8, 0, buf, -1, NULL, 0, NULL, NULL);
-    str->text = HeapAlloc(GetProcessHeap(), 0, size > 0 ? size : 1);
-    if (str->text)
-    {
-        str->text[0] = 0;
-        WideCharToMultiByte(CP_UTF8, 0, buf, -1, str->text, size, NULL, NULL);
-        obj->text = str->text;
-    }
+    str->text = new_text(buf, end);
+    obj->text = str->text;
     HeapFree(GetProcessHeap(), 0, buf);
     get_extents(hwnd, obj);
     return TRUE;

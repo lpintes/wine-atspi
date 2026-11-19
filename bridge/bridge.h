@@ -92,6 +92,34 @@ enum bridge_state
 
 #define BRIDGE_STATE_BIT(s) (1ULL << (s))
 
+/*
+ * Content of a text control as code points, line breaks "\n"; chars[count]
+ * is 0. Made by the Win32 side, never changed afterwards and shared by
+ * reference, so a large text crosses to the AT-SPI side without a copy.
+ * Each text has its own id. One made from the text with id base (0 if
+ * none) differs from it only in the range at start: removed code points
+ * there were replaced by the inserted ones now at start, so the AT-SPI
+ * side need not compare the two.
+ */
+struct bridge_text
+{
+    int refs;                   /* touched only by bridge_text_ref / bridge_text_unref */
+    unsigned int id;
+    unsigned int base;
+    int start;
+    int removed;
+    int inserted;
+    int count;
+    unsigned int chars[];
+};
+
+/*
+ * Take and drop a reference to text, NULL allowed. Implemented by the
+ * Win32 side; callable from any thread. The last unref frees it.
+ */
+void bridge_text_ref(struct bridge_text *text);
+void bridge_text_unref(struct bridge_text *text);
+
 /* One accessible object as seen by the Win32 core at one moment. */
 struct bridge_object
 {
@@ -106,11 +134,12 @@ struct bridge_object
     /* Accelerator of a menu item as shown, e.g. "Ctrl+O"; may be NULL. */
     const char *shortcut;
     /*
-     * Content of a text control, NULL for objects without text. Line
-     * breaks are "\n". Offsets count characters (code points), as AT-SPI
-     * does; selection_start == selection_end means no selection.
+     * Content of a text control, NULL for objects without text. Offsets
+     * count characters (code points), as AT-SPI does; selection_start ==
+     * selection_end means no selection. Whoever copies the object takes a
+     * reference to text.
      */
-    const char *text;
+    struct bridge_text *text;
     int caret;
     int selection_start;
     int selection_end;

@@ -407,7 +407,7 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
     }
     trace(L"key check: %p %ld %ld name \"%S\" value \"%S\" caret %d of %d (%lu messages, %lu ms)",
           hwnd, last_focus.id_object, last_focus.id_child, obj.name, obj.value ? obj.value : "",
-          obj.text ? obj.caret : -1, obj.text ? lstrlenA(obj.text) : -1, send_count - sent,
+          obj.text ? obj.caret : -1, obj.text ? obj.text->count : -1, send_count - sent,
           GetTickCount() - start);
     atspi_post_update(last_focus.pid, &obj);
     free_strings(&str);

@@ -790,6 +790,18 @@ Found with large texts in notepad (`tests/perf-text.sh`,
   ms, rest of the core about 10 ms, `set_text` 5-14 ms). Small texts got
   slower (10 KB 9-10 ms, was 5-8 ms): each request opens the process and
   allocates memory in it.
+- Since then the core hands the AT-SPI side a shared, unchanging
+  `struct bridge_text` (code points, reference counted by the core's
+  `bridge_text_ref` / `bridge_text_unref`, since the AT-SPI side cannot
+  free Win32 heap memory), which says what changed against the text it
+  was made from (`base`, `start`, `removed`, `inserted`). The core keeps
+  per window its UTF-16 text and that text (`text_copy` in `text.c`)
+  and converts only the change, widened so that it cuts no `\r\n` or
+  surrogate pair (`align_change` in `utf16.c`); `set_text` in `atspi.c`
+  takes the change if `base` is its text's id and compares the texts
+  only otherwise. 1.5M units: 17-22 ms per key, typing 43 ms; 1M units
+  12-13 ms, typing 24-30 ms (copy of the code points); 10 KB still 8-9
+  ms (2026-11-19).
 
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).

@@ -113,7 +113,7 @@ static void keep_strings(struct bridge_object *obj)
     obj->value = dup_utf8(obj->value);
     obj->window_class = dup_utf8(obj->window_class);
     obj->shortcut = dup_utf8(obj->shortcut);
-    obj->text = dup_utf8(obj->text);
+    bridge_text_ref(obj->text);
     if (obj->column_count > 0 &&
         (columns = HeapAlloc(GetProcessHeap(), 0, obj->column_count * sizeof(*columns))))
         for (i = 0; i < obj->column_count; i++)
@@ -132,7 +132,7 @@ static void free_kept_strings(struct bridge_object *obj)
     HeapFree(heap, 0, (char *)obj->value);
     HeapFree(heap, 0, (char *)obj->window_class);
     HeapFree(heap, 0, (char *)obj->shortcut);
-    HeapFree(heap, 0, (char *)obj->text);
+    bridge_text_unref(obj->text);
     for (i = 0; i < obj->column_count; i++)
         HeapFree(heap, 0, (char *)obj->columns[i]);
     HeapFree(heap, 0, (void *)obj->columns);
