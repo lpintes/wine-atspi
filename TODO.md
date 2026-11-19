@@ -37,7 +37,16 @@ Toolbars:
 
 Controls:
 
-- `Edit`: the whole text is re-read after each key.
+- `Edit` / RichEdit: large texts (books) do not work. The whole text is
+  read again after each key and caret move (about 30 ms per MB,
+  `tests/perf-text.sh`), and text beyond `TEXT_MAX_CHARS` (1M UTF-16
+  units) is cut off, so a caret past it lands at the end of the read
+  part. First test a file above the cap, then read text on demand in
+  ranges: `EM_GETLINECOUNT`, `EM_LINEINDEX`, `EM_GETLINE` for `Edit`,
+  `EM_GETTEXTRANGE` for RichEdit; keep the read ranges around the caret
+  and the ones Orca asked for, read everything only when the change is
+  unclear. Open: offset mapping (`\r\n`, surrogates) without the text
+  before the caret, and the place of a change for `text-changed`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
 - Tabs: `TCS_BUTTONS` untested.
 - 32-bit targets: a cross-process message costs about twice as much

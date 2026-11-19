@@ -339,6 +339,8 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
     HWND hwnd = last_focus.hwnd;
     WCHAR cls[256];
     int list;
+    DWORD start = GetTickCount();
+    ULONG sent = send_count;
 
     KillTimer(NULL, id);
     key_timer = 0;
@@ -403,9 +405,10 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
         free_strings(&str);
         return;
     }
-    trace(L"key check: %p %ld %ld name \"%S\" value \"%S\" caret %d", hwnd,
-          last_focus.id_object, last_focus.id_child, obj.name, obj.value ? obj.value : "",
-          obj.text ? obj.caret : -1);
+    trace(L"key check: %p %ld %ld name \"%S\" value \"%S\" caret %d of %d (%lu messages, %lu ms)",
+          hwnd, last_focus.id_object, last_focus.id_child, obj.name, obj.value ? obj.value : "",
+          obj.text ? obj.caret : -1, obj.text ? lstrlenA(obj.text) : -1, send_count - sent,
+          GetTickCount() - start);
     atspi_post_update(last_focus.pid, &obj);
     free_strings(&str);
     report_status_bar(GetAncestor(hwnd, GA_ROOT));

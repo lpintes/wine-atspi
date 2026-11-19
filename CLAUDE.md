@@ -746,6 +746,22 @@ Found with regedit's tree (`tests/perf-tree.sh` in the VM, 2026-11-18).
   `LastKey`, `programs/regedit/childwnd.c`), so the tests delete that
   value before starting it.
 
+Found with large texts in notepad (`tests/perf-text.sh` in the VM,
+2026-11-19).
+
+- The key check reads the whole text of an `Edit` again after each key
+  (`WM_GETTEXT`, 4 messages in all). It costs 5-8 ms for 10 KB, about
+  10 ms for 100 KB and 26-34 ms for 1 MB (the cap, `TEXT_MAX_CHARS`),
+  added to the 50 ms key delay. The key check trace shows caret, text
+  length, messages and time.
+- Text handling is therefore incomplete for large documents (books).
+  The cost grows linearly, about 30 ms per MB per key and per caret
+  move (also `SetCaretOffset` during say all), and text beyond
+  `TEXT_MAX_CHARS` is cut off. `char_offset` counts only within the
+  read part, so a caret past the cut should land at the end of the
+  read text (from the code; not tested with a larger file). The fix is
+  to read text on demand in ranges (`TODO.md`).
+
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).
 
