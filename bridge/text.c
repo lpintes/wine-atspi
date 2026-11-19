@@ -155,6 +155,67 @@ static struct text_copy *find_copy(HWND hwnd, DWORD pid)
     return slot;
 }
 
+/*
+ * Blocks of memory in targets for TEXT_MESSAGE, one per process, kept
+ * between reads: opening the process and allocating the block for each
+ * key cost a small text more than reading it.
+ */
+#define MAX_TEXT_BLOCKS 4
+
+static struct text_block
+{
+    DWORD pid;
+    struct remote r;
+    DWORD used;
+} blocks[MAX_TEXT_BLOCKS];
+
+static void free_block(struct text_block *block)
+{
+    if (block->pid)
+        remote_close(&block->r);
+    memset(block, 0, sizeof(*block));
+}
+
+/* The kept block in pid, else a new one in the free or oldest slot; NULL on an error. */
+static struct remote *text_block(HWND hwnd, DWORD pid)
+{
+    struct text_block *slot = NULL;
+    DWORD code;
+    int i;
+
+    for (i = 0; i < MAX_TEXT_BLOCKS; i++)
+    {
+        if (!blocks[i].pid)
+            continue;
+        if (!GetExitCodeProcess(blocks[i].r.process, &code) || code != STILL_ACTIVE)
+            free_block(&blocks[i]);
+        else if (blocks[i].pid == pid)
+        {
+            blocks[i].used = GetTickCount();
+            return &blocks[i].r;
+        }
+    }
+    for (i = 0; i < MAX_TEXT_BLOCKS; i++)
+        if (!slot || !blocks[i].pid || (slot->pid && blocks[i].used < slot->used))
+            slot = &blocks[i];
+    free_block(slot);
+    if (!remote_open(hwnd, &slot->r))
+        return NULL;
+    slot->pid = pid;
+    slot->used = GetTickCount();
+    return &slot->r;
+}
+
+/* Forgets the block of pid after an error, so that the next read opens a new one. */
+static void drop_block(DWORD pid)
+{
+    int i;
+
+    for (i = 0; i < MAX_TEXT_BLOCKS; i++)
+        if (blocks[i].pid == pid)
+            free_block(&blocks[i]);
+}
+
 /* Bytes per ReadProcessMemory in read_remote. */
 #define READ_CHUNK (1 << 20)
 
@@ -189,31 +250,36 @@ static BOOL read_remote(HANDLE process, const char *addr, char *buf, SIZE_T size
  * for a whole new text. Returns NULL without the hook (32-bit target) or
  * on an error.
  */
-static WCHAR *hook_text(HWND hwnd, struct text_copy *copy, DWORD *len, int *start,
+static WCHAR *hook_text(HWND hwnd, DWORD pid, struct text_copy *copy, DWORD *len, int *start,
                         int *removed, int *inserted, UINT64 *generation, DWORD *sel_start,
                         DWORD *sel_end)
 {
     static UINT message;
     struct text_request req;
-    struct remote r;
+    struct remote *r;
     WCHAR *text = NULL;
     DWORD_PTR ret;
     SIZE_T done;
 
     if (!message)
         message = RegisterWindowMessageW(TEXT_MESSAGE);
-    if (!message || !remote_open(hwnd, &r))
+    if (!message || !(r = text_block(hwnd, pid)))
         return NULL;
     memset(&req, 0, sizeof(req));
     req.tag = TEXT_REQUEST_TAG;
     req.generation = copy->hwnd ? copy->generation : 0;
-    if (!WriteProcessMemory(r.process, r.base, &req, sizeof(req), &done) ||
-        !send_message(hwnd, message, 0, (LPARAM)r.base, SEND_TIMEOUT_MS, &ret) ||
-        !ReadProcessMemory(r.process, r.base, &req, sizeof(req), &done) ||
+    if (!WriteProcessMemory(r->process, r->base, &req, sizeof(req), &done))
+    {
+        drop_block(pid);
+        return NULL;
+    }
+    if (!send_message(hwnd, message, 0, (LPARAM)r->base, SEND_TIMEOUT_MS, &ret) ||
+        !ReadProcessMemory(r->process, r->base, &req, sizeof(req), &done) ||
         req.tag != TEXT_REPLY_TAG)
     {
+        /* A 32-bit target has no hook; its block stays for the next try. */
         trace(L"text: no answer from the hook");
-        goto done;
+        return NULL;
     }
     if (!(req.flags & TEXT_REPLY_FULL) &&
         (!copy->text || req.start > copy->length || req.removed > copy->length - req.start ||
@@ -221,7 +287,7 @@ static WCHAR *hook_text(HWND hwnd, struct text_copy *copy, DWORD *len, int *star
     {
         /* Not the change of our copy; ask for the whole text next time. */
         free_copy(copy);
-        goto done;
+        return NULL;
     }
     if (req.flags & TEXT_REPLY_FULL)
         req.start = req.removed = 0;
@@ -230,16 +296,16 @@ static WCHAR *hook_text(HWND hwnd, struct text_copy *copy, DWORD *len, int *star
     else
     {
         if (!(text = HeapAlloc(GetProcessHeap(), 0, ((SIZE_T)req.length + 1) * sizeof(WCHAR))))
-            goto done;
+            return NULL;
         if (req.start)
             memcpy(text, copy->text, req.start * sizeof(WCHAR));
-        if (!read_remote(r.process, (const char *)(ULONG_PTR)req.data, (char *)(text + req.start),
+        if (!read_remote(r->process, (const char *)(ULONG_PTR)req.data, (char *)(text + req.start),
                          (SIZE_T)req.inserted * sizeof(WCHAR)))
         {
             HeapFree(GetProcessHeap(), 0, text);
-            text = NULL;
             free_copy(copy);
-            goto done;
+            drop_block(pid);
+            return NULL;
         }
         if (!(req.flags & TEXT_REPLY_FULL))
             memcpy(text + req.start + req.inserted, copy->text + req.start + req.removed,
@@ -255,8 +321,6 @@ static WCHAR *hook_text(HWND hwnd, struct text_copy *copy, DWORD *len, int *star
     *sel_end = req.sel_end;
     trace(L"text: hook %lu units, %lu removed and %lu inserted at %lu%s", req.length,
           req.removed, req.inserted, req.start, (req.flags & TEXT_REPLY_FULL) ? L" (full)" : L"");
-done:
-    remote_close(&r);
     return text;
 }
 
@@ -305,7 +369,7 @@ void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
     copy = find_copy(hwnd, pid);
     if (copy->hwnd && copy->masked != masked)
         free_copy(copy);
-    if ((buf = hook_text(hwnd, copy, &n, &change, &removed, &inserted, &generation, &start,
+    if ((buf = hook_text(hwnd, pid, copy, &n, &change, &removed, &inserted, &generation, &start,
                          &end)))
     {
         if (change >= 0 && (removed || inserted))

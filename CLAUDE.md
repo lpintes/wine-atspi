@@ -788,9 +788,7 @@ Found with large texts in notepad (`tests/perf-text.sh`,
   `char_offset`) and the AT-SPI side (UCS-4, diff), which still handle
   the whole text (measured: 1M units, cross-process `WM_GETTEXT` 15-22
   ms, rest of the core about 10 ms, `set_text` 5-14 ms). Small texts got
-  slower (10 KB 9-10 ms, was 5-8 ms). Opening the process and allocating
-  the block per request is not the cause: keeping one block per process
-  across keys changed nothing (10 KB 7-8 ms, 2026-11-19; not kept).
+  slower (10 KB 9-10 ms, was 5-8 ms).
 - Since then the core hands the AT-SPI side a shared, unchanging
   `struct bridge_text` (code points, reference counted by the core's
   `bridge_text_ref` / `bridge_text_unref`, since the AT-SPI side cannot
@@ -803,6 +801,15 @@ Found with large texts in notepad (`tests/perf-text.sh`,
   only otherwise. 1.5M units: 17-22 ms per key, typing 43 ms; 1M units
   12-13 ms, typing 24-30 ms (copy of the code points); 10 KB still 8-9
   ms (2026-11-19).
+- A small text's key check is cross-process calls, not text handling
+  (temporary timing, notepad 10 KB, 2026-11-19): the `WM_NULL` busy
+  check 1.9 ms (a cross-process message costs 1-2 ms there), the hook
+  request 3.5 ms, opening the process and allocating the block 0.9 ms,
+  `WriteProcessMemory` 0.7, `ReadProcessMemory` 0.3, closing 0.5,
+  labels and extents about 1 ms; conversion and caret near 0. Reading
+  the status bar after the update costs another 7 ms (not in the key
+  check's time). The block in the target is now kept per process across
+  keys (`text_block` in `text.c`): 10 KB 7-8 ms.
 
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).
