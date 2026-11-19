@@ -39,11 +39,10 @@ Controls:
 
 - `Edit` / RichEdit: large texts (books). Only the change crosses to
   the core and on to the AT-SPI side, but each key still costs about
-  12 ms per MB (hook reads and compares the whole text in the target,
-  `char_offset` of the caret, a copy of the code points on a change;
-  `tests/perf-text.sh`). Next: keep the remote block per window, since
-  small texts got slower (10 KB 8-9 ms, 5-8 ms before the hook).
-  32-bit targets (no hook) are still cut at `TEXT_MAX_CHARS`.
+  10-20 ms per MB (hook reads and compares the whole text in the
+  target, `char_offset` of the caret, a copy of the code points on a
+  change; `tests/perf-text.sh`; 10 KB 1 ms). 32-bit targets (no hook)
+  are still cut at `TEXT_MAX_CHARS`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
 - Tabs: `TCS_BUTTONS` untested.
 - 32-bit targets: a cross-process message costs about twice as much

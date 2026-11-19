@@ -382,13 +382,12 @@ static BOOL describe_window(HWND hwnd, const WCHAR *cls, struct bridge_object *o
     if (has_edit_text(cls))
     {
         /*
-         * The text is read next, so a busy target must fail here and be
-         * asked again (the Open dialog's file name field while the dialog
-         * is created). A RichEdit's window text is the whole document,
-         * which is not its name.
+         * No message: a RichEdit's window text is the whole document, which
+         * is not its name, and the text read in describe_object tells a busy
+         * target (the Open dialog's file name field while the dialog is
+         * created), which then fails and is asked again. A WM_NULL first
+         * cost as much as half the read of a small text.
          */
-        if (!send_message(hwnd, WM_NULL, 0, 0, SEND_TIMEOUT_MS, NULL))
-            return FALSE;
         /* The Edit of a combo box is unnamed, see describe_object. */
         if (edit && !outer_combo(hwnd))
             edit_label(hwnd, str->object, sizeof(str->object));
@@ -511,7 +510,8 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
          */
         if (rich)
             str->object[0] = 0;
-        describe_edit_text(hwnd, rich, obj, str);
+        if (!describe_edit_text(hwnd, rich, obj, str) && is_busy(hwnd))
+            return FALSE;
     }
     if (obj->role == BRIDGE_ROLE_COMBO_BOX)
     {

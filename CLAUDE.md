@@ -809,7 +809,14 @@ Found with large texts in notepad (`tests/perf-text.sh`,
   labels and extents about 1 ms; conversion and caret near 0. Reading
   the status bar after the update costs another 7 ms (not in the key
   check's time). The block in the target is now kept per process across
-  keys (`text_block` in `text.c`): 10 KB 7-8 ms.
+  keys (`text_block` in `text.c`): 10 KB 7-8 ms. Without the `WM_NULL`
+  (`describe_window` sends no message for an `Edit` or RichEdit; a busy
+  target fails the text read, `describe_edit_text` returns FALSE and
+  `describe_object` fails as before) one message is left and 10 KB
+  takes 1 ms, 100 KB 3-5 ms, 1 MB 10-20 ms. That is more than the 1.9
+  ms the `WM_NULL` itself took; the hook request after it was slower
+  too, why was not looked into. The busy path of the text read was not
+  hit in the tests (no "busy" line in `bridge-notepad.log`).
 
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).

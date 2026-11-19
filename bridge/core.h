@@ -260,7 +260,7 @@ HWND find_updown(HWND hwnd);
 void describe_range(HWND hwnd, const WCHAR *cls, struct bridge_object *obj);
 
 /* text.c */
-void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
+BOOL describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
                         struct focus_strings *str);
 BOOL has_edit_text(const WCHAR *cls);
 struct bridge_text *new_text(const WCHAR *src, int len);

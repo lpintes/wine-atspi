@@ -352,9 +352,10 @@ static WCHAR *message_text(HWND hwnd, DWORD *len, DWORD *sel_start, DWORD *sel_e
  * Text, caret and selection of an Edit or RichEdit; str->text holds the
  * reference to obj->text. The bridge keeps the last text of the window,
  * so that only a change is read and converted, and the new text tells the
- * AT-SPI side what changed against the one before.
+ * AT-SPI side what changed against the one before. FALSE if no text could
+ * be read; is_busy then tells a busy target.
  */
-void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
+BOOL describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
                         struct focus_strings *str)
 {
     DWORD start = 0, end = 0, start_index, end_index, pid = 0, n = 0;
@@ -381,7 +382,7 @@ void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
             find_change(copy->text, copy->length, buf, n, &change, &removed, &inserted);
     }
     else
-        return;
+        return FALSE;
 
     if (change >= 0 && copy->chars && !removed && !inserted)
     {
@@ -410,7 +411,7 @@ void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
     if (!chars)
     {
         free_copy(copy);
-        return;
+        return TRUE;
     }
     bridge_text_ref(chars);
     copy->hwnd = hwnd;
@@ -421,6 +422,7 @@ void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
     copy->used = GetTickCount();
     str->text = chars;
     obj->text = chars;
+    return TRUE;
 }
 
 BOOL has_edit_text(const WCHAR *cls)
