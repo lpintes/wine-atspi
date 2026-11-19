@@ -4,8 +4,12 @@
  */
 #include "core.h"
 
-/* Text beyond this many UTF-16 units is cut off. */
-#define TEXT_MAX_CHARS (1 << 20)
+/*
+ * Text beyond this many UTF-16 units is cut off. A cross-process
+ * WM_GETTEXT of 1,048,570 units or more never returns in Wine 11.21
+ * (1,040,000 work), so the cap stays below that.
+ */
+#define TEXT_MAX_CHARS 1000000
 
 /*
  * EM_GETSEL orders start and end, so it does not tell at which end the
