@@ -898,6 +898,21 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
   application side in walk (`FormBase.SetVisible` shows an enabled
   top-level form with `SW_SHOW` the first time, lpintes/walk 6e4e3fa).
 
+Found with a 32-bit target (`tests/bridge-controls32.sh`, Wine 11.21,
+2026-11-19).
+
+- The WoW64 layouts of `REMOTE_STRUCT` (`core.h`; list view items and
+  columns, tree view items, tabs, toolbar buttons) read a 32-bit
+  `tests/controls.c` exactly like the 64-bit one: the event logs match
+  except for timing and the toolbar's 'Help', which has no name without
+  the 64-bit-only hook DLL. A cross-process message to the 32-bit
+  target costs about twice as much (whole tree 420-530 ms, 64-bit
+  210-250 ms, 162 messages each).
+- Escape closed the window while its tree was being built: the destroy
+  event, served nested in a `send_message`, removed the frame, and the
+  finished tree added it again to a dying application. `report_tree`
+  drops a tree whose top window is gone ("tree: ... gone").
+
 ## Open questions (to verify by experiment)
 
 - How good are Wine's `oleacc` proxies for the other standard controls
@@ -988,7 +1003,15 @@ Found with a walk (Go) program and `tests/msgbox-race.c` (Wine 11.21,
   extents and visible lines do too. Controls missing from Wine's own
   programs are tested with `tests/controls.c` (window class
   `WineAtspiControls`) and `tests/bridge-controls.sh`. The test scripts
-  still run in WSL as well.
+  still run in WSL as well. `tests/bridge-controls32.sh` runs the same
+  test on `build/controls32.exe`, a 32-bit PE from
+  `i686-w64-mingw32-gcc` (Arch's wine has no i386-unix part, so no
+  32-bit Winelib), in its own prefix `~/.wine-atspi32`: the VM's
+  `~/.wine-atspi` has an empty `syswow64` (32-bit programs fail with
+  "could not load kernel32.dll"), and `wineboot -u` cannot fill it, since
+  its `Wow64Install` step runs `syswow64\rundll32.exe`. A new prefix gets
+  it from `wineboot -i`, which on a display waits for the Mono / Gecko
+  dialog unless `WINEDLLOVERRIDES=mscoree,mshtml=`.
 - **Tests with Orca in the Arch image** `C:\linux\arch.img`. Its build
   scripts and rules are in `C:\Users\pintes\pokus\archfile` (read its
   `CLAUDE.md` before touching the image).

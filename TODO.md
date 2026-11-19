@@ -41,7 +41,10 @@ Controls:
   after each key, no `SetCaretOffset`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
 - Tabs: `TCS_BUTTONS` untested.
-- 32-bit layouts (`LVITEMW`, `TVITEMW`, `TCITEMW`) untested.
+- 32-bit targets: a cross-process message costs about twice as much
+  (tree of `tests/controls.c`: 162 messages, 420-530 ms against 210-250
+  ms for the 64-bit build). Not looked into; measure where the time goes
+  (WoW64 message thunks, `VirtualAllocEx` / `ReadProcessMemory`).
 - Console: a full buffer (150 rows) shifts lines up, so the diff gives
   one huge delete + insert; wide (CJK) cells untested.
 - Menus: the `Edit` context menu (Shift+F10) is silent until the first

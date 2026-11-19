@@ -277,11 +277,23 @@ void report_tree(HWND top, HWND control, BOOL items)
         memset(&tree, 0, sizeof(tree));
         describe_frame(top, &tree.frame, b.str);
         /*
+         * The window went away while the tree was built (Escape closes it;
+         * its destroy event ran nested in a send_message and removed the
+         * frame): posting the tree would add the frame again.
+         */
+        if (!IsWindow(top))
+        {
+            trace(L"tree: %p gone after %lu ms", top, GetTickCount() - start);
+            for (i = 0; i < b.count; i++)
+                free_kept_strings(&b.objects[i]);
+            b.count = -1;
+        }
+        /*
          * A busy target left windows out and gave the frame no name (the
          * Open dialog while its file type combo refills the list): such a
          * tree would remove them in Orca's view, so ask again later.
          */
-        if (is_busy(top))
+        else if (is_busy(top))
         {
             trace(L"tree: %p busy after %lu ms", top, GetTickCount() - start);
             for (i = 0; i < b.count; i++)

@@ -1,13 +1,15 @@
 #!/bin/bash
 # Run the bridge against tests/controls.c and log the AT-SPI events it emits.
 # Usage: tests/bridge-controls.sh [LOG]   (from the repository root, or by tests/vm.sh)
-# The bridge's own stderr goes to build/bridge.log.
+# The bridge's own stderr goes to build/bridge.log. CONTROLS picks another
+# build of the window (tests/bridge-controls32.sh).
 
 set -u
 export WINEPREFIX=${WINEPREFIX:-$HOME/.wine-atspi}
 export WINEDEBUG=${WINEDEBUG:--all}
 LOG=${1:-build/bridge-controls.log}
 BUILD=build
+CONTROLS=${CONTROLS:-$BUILD/controls.exe.so}
 
 # The test runs its own bridge with traces on stderr: drop one installed
 # by bridge.sh, and the session its uninstall command started.
@@ -20,7 +22,7 @@ sleep 2
 python3 tests/atspi-events.py 41 > "$LOG" 2>&1 &
 events=$!
 sleep 1
-wine $BUILD/controls.exe.so &
+wine "$CONTROLS" &
 sleep 2
 
 # "Fruits:" list: focus on item 'Apple' 1/3 (no selection yet); Down must

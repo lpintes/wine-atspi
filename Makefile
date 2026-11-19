@@ -16,7 +16,8 @@ WIN32_FLAGS = -mno-cygwin -mconsole $(STRINGOP_FLAGS)
 export WINEPREFIX
 
 all: $(BUILD)/probe.exe.so $(BUILD)/sendkeys.exe.so $(BUILD)/controls.exe.so \
-	$(BUILD)/msgbox-race.exe.so $(BUILD)/wine-atspi.exe.so $(BUILD)/wine-atspi-hook.dll
+	$(BUILD)/msgbox-race.exe.so $(BUILD)/wine-atspi.exe.so $(BUILD)/wine-atspi-hook.dll \
+	$(BUILD)/controls32.exe
 
 $(BUILD):
 	mkdir -p $@
@@ -89,6 +90,14 @@ $(BUILD)/sendkeys.exe.so: tools/sendkeys.c | $(BUILD)
 
 $(BUILD)/controls.exe.so: tests/controls.c | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/controls.exe $< -lcomctl32
+
+# The same window as a 32-bit PE, for the bridge's WoW64 struct layouts
+# (tests/bridge-controls32.sh). Arch's wine has no i386-unix part, so a
+# 32-bit Winelib ELF is not possible.
+MINGW32_CC ?= i686-w64-mingw32-gcc
+
+$(BUILD)/controls32.exe: tests/controls.c | $(BUILD)
+	$(MINGW32_CC) -O2 -Wall -static-libgcc -o $@ $< -lcomctl32
 
 $(BUILD)/msgbox-race.exe.so: tests/msgbox-race.c | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/msgbox-race.exe $< -lshell32
