@@ -800,7 +800,7 @@ static const char *const *node_interfaces(struct node *node, guint *count)
         ifaces[(*count)++] = IFACE_TABLE;
         ifaces[(*count)++] = IFACE_SELECTION;
     }
-    else if (node->role == BRIDGE_ROLE_LIST_BOX)
+    else if (node->role == BRIDGE_ROLE_LIST_BOX || node->role == BRIDGE_ROLE_TREE)
         ifaces[(*count)++] = IFACE_SELECTION;
     else if (node->role == BRIDGE_ROLE_TABLE_CELL)
         ifaces[(*count)++] = IFACE_TABLE_CELL;
@@ -893,21 +893,62 @@ static gboolean row_selected(struct node *list, gint row)
 }
 
 /*
+ * A tree's children are the items in view plus a focused item scrolled
+ * away (tree_idle), each with its own selected state. Returns the
+ * index-th selected child (index -1: none) and sets *count to the number
+ * of selected children.
+ */
+static struct node *tree_selected_child(struct node *tree, gint index, gint *count)
+{
+    struct node *found = NULL;
+    guint i;
+
+    *count = 0;
+    for (i = 0; i < tree->children->len; i++)
+    {
+        struct node *child = tree->children->pdata[i];
+
+        if (!child || !(child->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED)))
+            continue;
+        if ((*count)++ == index)
+            found = child;
+    }
+    return found;
+}
+
+/*
  * Selection of a table, as GTK 3's tree view gives it: the selected
  * children are the first cells of the selected rows. Orca's flat review
  * reads only the visible cells of a table with Table and Selection
  * (ax_utilities.py, _get_on_screen_objects). A list box's selected
  * children are its selected items; Where Am I selection (Orca+Shift+Up)
  * needs a container with Selection (get_selection_container in
- * ax_utilities_selection.py), else it speaks the selected text.
+ * ax_utilities_selection.py), else it speaks the selected text. A tree's
+ * selected children are its selected items in view; Orca counts the
+ * selectable ones from its tree item descendants
+ * (selectable_child_count), which are only the items in view.
  * Changing the selection is not supported.
  */
 static GVariant *selection_method(struct node *node, const char *method, GVariant *params)
 {
-    gint index = -1, n = node->column_count;
+    gint index = -1, n = node->column_count, count;
 
     if (g_variant_is_of_type(params, G_VARIANT_TYPE("(i)")))
         g_variant_get(params, "(i)", &index);
+    if (node->role == BRIDGE_ROLE_TREE && !g_strcmp0(method, "GetSelectedChild"))
+    {
+        struct node *child = tree_selected_child(node, index, &count);
+
+        return g_variant_new("(@(so))", child ? node_ref(child) : null_ref());
+    }
+    if (node->role == BRIDGE_ROLE_TREE && !g_strcmp0(method, "IsChildSelected"))
+    {
+        struct node *child = index >= 0 && index < (gint)node->children->len ?
+                             node->children->pdata[index] : NULL;
+
+        return g_variant_new("(b)", child &&
+                                    (child->states & BRIDGE_STATE_BIT(BRIDGE_STATE_SELECTED)));
+    }
     if (!g_strcmp0(method, "GetSelectedChild"))
     {
         gint child = index >= 0 && index < node->selected_listed ?
@@ -1345,6 +1386,13 @@ static GVariant *get_property(GDBusConnection *conn, const char *sender,
         return g_variant_new_int32(node->column_count);
     if (!g_strcmp0(prop, "Caption") || !g_strcmp0(prop, "Summary"))
         return null_ref();
+    if (!g_strcmp0(prop, "NSelectedChildren") && node->role == BRIDGE_ROLE_TREE)
+    {
+        gint count;
+
+        tree_selected_child(node, -1, &count);
+        return g_variant_new_int32(count);
+    }
     if (!g_strcmp0(prop, "NSelectedRows") || !g_strcmp0(prop, "NSelectedChildren"))
         return g_variant_new_int32(node->selected_count);
     if (!g_strcmp0(prop, "NSelectedColumns"))

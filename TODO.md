@@ -15,9 +15,6 @@ See "Application scripts" in `CLAUDE.md` and the API in
 
 Window tree (object navigation, flat review):
 
-- `Selection` for trees; tables and list boxes have it. Orca counts the
-  selectable items of a tree from its `tree item` descendants, and the
-  bridge knows only the visible ones.
 - `Action` for other objects than Win32 buttons (list items, tabs, combo
   boxes, toolbar buttons), if Orca's mouse click fallback is not good
   enough.

@@ -79,8 +79,10 @@ timeout 10 wine $BUILD/sendkeys.exe.so f:Notepad w:500 k:alt+f4 w:2000
 # stays, not showing and without its old rect; Ctrl+Home brings it back
 # with a rect. Ctrl+End and Tab then move the focus to the value list while
 # the subkey is scrolled away: its node must leave with the next tree, so
-# no tree item is left without showing. Only the focused object, the first
-# item lines and that count are kept. regedit reopens the key it showed
+# no tree item is left without showing. The tree's Selection gives the
+# focused subkey while it is scrolled away too. Only the focused object,
+# the first item lines, the tree's selected children and that count are
+# kept. regedit reopens the key it showed
 # last (LastKey, programs/regedit/childwnd.c), so that is reset first.
 wine reg delete 'HKCU\Software\Microsoft\Windows\CurrentVersion\Applets\Regedit' \
     /v LastKey /f > /dev/null 2>&1
@@ -97,6 +99,7 @@ for step in "first subkey focused:" "Ctrl+End:k:ctrl+end" "Ctrl+Home:k:ctrl+home
         python3 tests/atspi-dump.py -v regedit > $BUILD/regedit-dump.txt
         grep -a ' focused' $BUILD/regedit-dump.txt
         grep -a 'tree item' $BUILD/regedit-dump.txt | head -2
+        grep -a -A1 '^ *tree \[' $BUILD/regedit-dump.txt | grep -a 'selected children'
         echo "tree items not showing: $(grep -a 'tree item' $BUILD/regedit-dump.txt | grep -vc showing)"
         grep -a 'tree item' $BUILD/regedit-dump.txt | grep -v showing
     } >> "$LOG" 2>&1

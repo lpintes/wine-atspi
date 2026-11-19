@@ -553,6 +553,17 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   so the key's item refresh posts the list itself too (`report_tree`
   with a control). Confirmed with Orca on `tests/controls.c` "Colors"
   and "Fruits" (2026-11-10); `tests/bridge-tree.sh`.
+- From a tree item Where Am I selection climbs to a `tree` with
+  `Selection` and counts its `tree item` descendants. A tree's children
+  are only the items in view (plus a focused one scrolled away), so the
+  count is right only when the whole tree fits. The exact number of
+  expanded items is the vertical scroll range (`maxVisibleOrder` in
+  `comctl32/treeview.c`), but Wine's `GetScrollInfo` fails for another
+  process's window (`get_scroll_info_ptr` in `win32u/scroll.c`). Decided
+  (2026-11-19): the tree's selected children are its selected items
+  in view (`tree_selected_child` in `atspi.c`), no hook DLL for the
+  count. Checked in `tests/bridge-tree.sh` (regedit), not yet heard with
+  Orca.
 - Object navigator (`object_navigator_command_definitions.py`):
   Orca+Ctrl+arrows move, Orca+Ctrl+Return activates, Orca+Shift+A lists
   the object's actions. Activation tries the actions click, press, jump,
