@@ -37,17 +37,15 @@ Toolbars:
 
 Controls:
 
-- `Edit` / RichEdit: large texts (books) do not work. The whole text is
-  read again after each key and caret move (about 30 ms per MB,
-  `tests/perf-text.sh`), and text beyond `TEXT_MAX_CHARS` (1,000,000
-  UTF-16 units, just below Wine's cross-process `WM_GETTEXT` limit) is
-  cut off, so a caret past it lands at the end of the read part
-  (`tests/bridge-text-large.sh` fails until this is fixed). Read text
-  on demand in ranges: `EM_GETLINECOUNT`, `EM_LINEINDEX`, `EM_GETLINE` for `Edit`,
-  `EM_GETTEXTRANGE` for RichEdit; keep the read ranges around the caret
-  and the ones Orca asked for, read everything only when the change is
-  unclear. Open: offset mapping (`\r\n`, surrogates) without the text
-  before the caret, and the place of a change for `text-changed`.
+- `Edit` / RichEdit: large texts (books) are slow. The hook DLL hands
+  over only the changed range (`hook_text`), but the core still strips
+  `\r\n`, converts to UTF-8 and counts characters over the whole text,
+  and the AT-SPI side converts and diffs it all (about 25 ms per MB per
+  key and caret move, `tests/perf-text.sh`). Next: the core keeps its
+  UTF-16 copy and sends the AT-SPI side the change (start, deleted,
+  inserted) instead of the whole text; keep the remote block per
+  window, since small texts got slower. 32-bit targets (no hook) are
+  still cut at `TEXT_MAX_CHARS`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
 - Tabs: `TCS_BUTTONS` untested.
 - 32-bit targets: a cross-process message costs about twice as much

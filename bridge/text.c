@@ -30,28 +30,177 @@ static BOOL caret_at_start(HWND hwnd, DWORD start)
     return (short)LOWORD(pos) == gti.rcCaret.left && (short)HIWORD(pos) == gti.rcCaret.top;
 }
 
+/* Texts of windows as the hook DLL handed them over last (hook_text). */
+#define MAX_TEXT_COPIES 4
+
+static struct text_copy
+{
+    HWND hwnd;
+    DWORD pid;
+    UINT64 generation;
+    WCHAR *text;
+    UINT32 length;
+    DWORD used;
+} copies[MAX_TEXT_COPIES];
+
+static void free_copy(struct text_copy *copy)
+{
+    HeapFree(GetProcessHeap(), 0, copy->text);
+    memset(copy, 0, sizeof(*copy));
+}
+
+/* The copy of hwnd in pid, else a free or the oldest slot, cleared. */
+static struct text_copy *find_copy(HWND hwnd, DWORD pid)
+{
+    struct text_copy *slot = NULL;
+    int i;
+
+    for (i = 0; i < MAX_TEXT_COPIES; i++)
+        if (copies[i].hwnd == hwnd && copies[i].pid == pid)
+            return &copies[i];
+    for (i = 0; i < MAX_TEXT_COPIES; i++)
+        if (!slot || !copies[i].hwnd || (slot->hwnd && copies[i].used < slot->used))
+            slot = &copies[i];
+    free_copy(slot);
+    return slot;
+}
+
+/* Bytes per ReadProcessMemory in read_remote. */
+#define READ_CHUNK (1 << 20)
+
+/* Reads size bytes from the target in pieces of READ_CHUNK. */
+static BOOL read_remote(HANDLE process, const char *addr, char *buf, SIZE_T size)
+{
+    SIZE_T done, part;
+
+    while (size)
+    {
+        part = min(size, READ_CHUNK);
+        if (!ReadProcessMemory(process, addr, buf, part, &done) || done != part)
+        {
+            trace(L"text: ReadProcessMemory of %lu bytes failed, error %lu", (ULONG)part,
+                  GetLastError());
+            return FALSE;
+        }
+        addr += part;
+        buf += part;
+        size -= part;
+    }
+    return TRUE;
+}
+
+/*
+ * Text of hwnd read by the hook DLL inside the target (TEXT_MESSAGE in
+ * menuhook.h): only the change against the bridge's copy crosses the
+ * process. Returns a heap copy of the text of *len units and the EM_GETSEL
+ * range, or NULL without the hook (32-bit target) or on an error.
+ */
+static WCHAR *hook_text(HWND hwnd, DWORD *len, DWORD *sel_start, DWORD *sel_end)
+{
+    static UINT message;
+    struct text_request req;
+    struct text_copy *copy;
+    struct remote r;
+    WCHAR *text = NULL, *result = NULL;
+    DWORD pid = 0;
+    DWORD_PTR ret;
+    SIZE_T done;
+
+    if (!message)
+        message = RegisterWindowMessageW(TEXT_MESSAGE);
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!message || !remote_open(hwnd, &r))
+        return NULL;
+    copy = find_copy(hwnd, pid);
+    memset(&req, 0, sizeof(req));
+    req.tag = TEXT_REQUEST_TAG;
+    req.generation = copy->hwnd ? copy->generation : 0;
+    if (!WriteProcessMemory(r.process, r.base, &req, sizeof(req), &done) ||
+        !send_message(hwnd, message, 0, (LPARAM)r.base, SEND_TIMEOUT_MS, &ret) ||
+        !ReadProcessMemory(r.process, r.base, &req, sizeof(req), &done) ||
+        req.tag != TEXT_REPLY_TAG)
+    {
+        trace(L"text: no answer from the hook");
+        goto done;
+    }
+    if (!(req.flags & TEXT_REPLY_FULL) &&
+        (!copy->hwnd || req.start > copy->length || req.removed > copy->length - req.start ||
+         req.length != copy->length - req.removed + req.inserted))
+    {
+        /* Not the change of our copy; ask for the whole text next time. */
+        free_copy(copy);
+        goto done;
+    }
+    if (req.flags & TEXT_REPLY_FULL)
+        req.start = req.removed = 0;
+    if (!(req.flags & TEXT_REPLY_FULL) && !req.removed && !req.inserted)
+        text = copy->text;
+    else
+    {
+        if (!(text = HeapAlloc(GetProcessHeap(), 0, ((SIZE_T)req.length + 1) * sizeof(WCHAR))))
+            goto done;
+        if (req.start)
+            memcpy(text, copy->text, req.start * sizeof(WCHAR));
+        if (!read_remote(r.process, (const char *)(ULONG_PTR)req.data, (char *)(text + req.start),
+                         (SIZE_T)req.inserted * sizeof(WCHAR)))
+        {
+            HeapFree(GetProcessHeap(), 0, text);
+            free_copy(copy);
+            goto done;
+        }
+        if (!(req.flags & TEXT_REPLY_FULL))
+            memcpy(text + req.start + req.inserted, copy->text + req.start + req.removed,
+                   (req.length - req.start - req.inserted) * sizeof(WCHAR));
+        text[req.length] = 0;
+        HeapFree(GetProcessHeap(), 0, copy->text);
+        copy->text = text;
+    }
+    copy->hwnd = hwnd;
+    copy->pid = pid;
+    copy->generation = req.generation;
+    copy->length = req.length;
+    copy->used = GetTickCount();
+    if ((result = HeapAlloc(GetProcessHeap(), 0, ((SIZE_T)req.length + 1) * sizeof(WCHAR))))
+    {
+        memcpy(result, text, ((SIZE_T)req.length + 1) * sizeof(WCHAR));
+        *len = req.length;
+        *sel_start = req.sel_start;
+        *sel_end = req.sel_end;
+    }
+    trace(L"text: hook %lu units, %lu removed and %lu inserted at %lu%s", req.length,
+          req.removed, req.inserted, req.start, (req.flags & TEXT_REPLY_FULL) ? L" (full)" : L"");
+done:
+    remote_close(&r);
+    return result;
+}
+
 /* Text, caret and selection of an Edit or RichEdit; str->text owns the text. */
 void describe_edit_text(HWND hwnd, BOOL rich, struct bridge_object *obj,
                                struct focus_strings *str)
 {
     DWORD_PTR len = 0;
-    DWORD start = 0, end = 0, start_index, end_index;
+    DWORD start = 0, end = 0, start_index, end_index, hook_len;
     WCHAR *buf, *src, *dst;
     int size, i, n;
 
-    if (!send_message(hwnd, WM_GETTEXTLENGTH, 0, 0, SEND_TIMEOUT_MS, &len))
-        return;
-    if (len > TEXT_MAX_CHARS)
-        len = TEXT_MAX_CHARS;
-    buf = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
-    if (!buf)
-        return;
-    if (!send_message(hwnd, WM_GETTEXT, len + 1, (LPARAM)buf, SEND_TIMEOUT_MS, &len))
-        len = 0;
-    buf[len] = 0;
-    n = len;
-    /* Pointer arguments of EM_GETSEL are marshalled like on Windows. */
-    send_message(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end, SEND_TIMEOUT_MS, NULL);
+    if ((buf = hook_text(hwnd, &hook_len, &start, &end)))
+        n = hook_len;
+    else
+    {
+        if (!send_message(hwnd, WM_GETTEXTLENGTH, 0, 0, SEND_TIMEOUT_MS, &len))
+            return;
+        if (len > TEXT_MAX_CHARS)
+            len = TEXT_MAX_CHARS;
+        buf = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
+        if (!buf)
+            return;
+        if (!send_message(hwnd, WM_GETTEXT, len + 1, (LPARAM)buf, SEND_TIMEOUT_MS, &len))
+            len = 0;
+        buf[len] = 0;
+        n = len;
+        /* Pointer arguments of EM_GETSEL are marshalled like on Windows. */
+        send_message(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end, SEND_TIMEOUT_MS, NULL);
+    }
     start_index = rich ? rich_text_index(buf, n, start) : start;
     end_index = rich ? rich_text_index(buf, n, end) : end;
     obj->selection_start = char_offset(buf, n, start_index);

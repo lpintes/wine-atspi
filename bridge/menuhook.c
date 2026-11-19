@@ -4,7 +4,8 @@
  * prefix (user32/hook.c, get_hook_proc). It watches the menu messages
  * that Wine sends to the menu owner and reports each highlighted item to
  * the bridge as a struct menu_record (menuhook.h) by WM_COPYDATA. It also
- * answers the bridge's TOOLTIP_MESSAGE for toolbar buttons.
+ * answers the bridge's TOOLTIP_MESSAGE for toolbar buttons and TEXT_MESSAGE
+ * for the text of Edit and RichEdit controls.
  *
  * Built with mingw, not winegcc: a Winelib DLL cannot be loaded into a
  * PE process.
@@ -300,18 +301,143 @@ static void answer_tooltip(HWND toolbar, UINT command, WCHAR *text)
         lstrcpynW(text, info.lpszText, TOOLTIP_TEXT_MAX);
 }
 
+/* Windows whose last text the hook keeps for TEXT_MESSAGE. */
+#define MAX_TEXTS 8
+
+static struct text_copy
+{
+    HWND hwnd;
+    UINT64 generation;
+    WCHAR *text;
+    UINT32 length;
+    DWORD used;         /* GetTickCount of the last request, to evict the oldest */
+} texts[MAX_TEXTS];
+static UINT64 text_generation;
+
+static void free_text(struct text_copy *copy)
+{
+    HeapFree(GetProcessHeap(), 0, copy->text);
+    memset(copy, 0, sizeof(*copy));
+}
+
+/* The copy of hwnd, else a free or the oldest slot, cleared. */
+static struct text_copy *find_text(HWND hwnd)
+{
+    struct text_copy *slot = NULL;
+    int i;
+
+    for (i = 0; i < MAX_TEXTS; i++)
+    {
+        if (texts[i].hwnd == hwnd)
+            return &texts[i];
+        if (texts[i].hwnd && !IsWindow(texts[i].hwnd))
+            free_text(&texts[i]);
+    }
+    for (i = 0; i < MAX_TEXTS; i++)
+        if (!slot || !texts[i].hwnd || (slot->hwnd && texts[i].used < slot->used))
+            slot = &texts[i];
+    free_text(slot);
+    return slot;
+}
+
+static BOOL is_text_class(HWND hwnd)
+{
+    WCHAR cls[32];
+
+    return GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) &&
+           (!lstrcmpiW(cls, L"Edit") || !lstrcmpiW(cls, L"RICHEDIT50W") ||
+            !lstrcmpiW(cls, L"RichEdit20A") || !lstrcmpiW(cls, L"RichEdit20W"));
+}
+
+/*
+ * Reads the text of an Edit or RichEdit in its own thread, where
+ * WM_GETTEXT has no size limit, and answers req with the change against
+ * the copy the bridge holds (TEXT_MESSAGE in menuhook.h).
+ */
+static void answer_text(HWND hwnd, struct text_request *req)
+{
+    MEMORY_BASIC_INFORMATION info;
+    struct text_copy *copy;
+    UINT32 len, prefix, suffix;
+    DWORD sel_start = 0, sel_end = 0;
+    WCHAR *text;
+
+    if (!req || VirtualQuery(req, &info, sizeof(info)) != sizeof(info) ||
+        info.State != MEM_COMMIT || info.Protect != PAGE_READWRITE ||
+        (char *)(req + 1) > (char *)info.BaseAddress + info.RegionSize ||
+        req->tag != TEXT_REQUEST_TAG || !is_text_class(hwnd))
+        return;
+    len = SendMessageW(hwnd, WM_GETTEXTLENGTH, 0, 0);
+    if (!(text = HeapAlloc(GetProcessHeap(), 0, ((SIZE_T)len + 1) * sizeof(WCHAR))))
+        return;
+    /*
+     * Not SendMessageW: win32u passes it to the window procedure by
+     * KeUserModeCallback, and with a text of 1.5M units the hook never
+     * answered (Wine 11.21). CallWindowProcW calls the procedure directly
+     * in user32.
+     */
+    len = CallWindowProcW((WNDPROC)GetWindowLongPtrW(hwnd, GWLP_WNDPROC), hwnd, WM_GETTEXT,
+                          (WPARAM)len + 1, (LPARAM)text);
+    text[len] = 0;
+    SendMessageW(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+
+    copy = find_text(hwnd);
+    if (copy->hwnd && copy->generation == req->generation)
+    {
+        for (prefix = 0; prefix < len && prefix < copy->length && text[prefix] == copy->text[prefix];
+             prefix++)
+            ;
+        for (suffix = 0; suffix < len - prefix && suffix < copy->length - prefix &&
+                         text[len - 1 - suffix] == copy->text[copy->length - 1 - suffix];
+             suffix++)
+            ;
+        req->flags = 0;
+        req->start = prefix;
+        req->removed = copy->length - prefix - suffix;
+        req->inserted = len - prefix - suffix;
+    }
+    else
+    {
+        req->flags = TEXT_REPLY_FULL;
+        req->start = 0;
+        req->removed = 0;
+        req->inserted = len;
+    }
+    if (req->flags || req->removed || req->inserted)
+    {
+        HeapFree(GetProcessHeap(), 0, copy->text);
+        copy->hwnd = hwnd;
+        copy->generation = ++text_generation;
+        copy->text = text;
+        copy->length = len;
+    }
+    else
+        HeapFree(GetProcessHeap(), 0, text);
+    copy->used = GetTickCount();
+    req->generation = copy->generation;
+    req->length = copy->length;
+    req->data = (UINT64)(ULONG_PTR)(copy->text + req->start);
+    req->sel_start = sel_start;
+    req->sel_end = sel_end;
+    req->tag = TEXT_REPLY_TAG;
+}
+
 __declspec(dllexport) LRESULT CALLBACK CallWndProc(int code, WPARAM wp, LPARAM lp)
 {
-    static UINT tooltip_message;
+    static UINT tooltip_message, text_message;
 
     if (!tooltip_message)
         tooltip_message = RegisterWindowMessageW(TOOLTIP_MESSAGE);
+    if (!text_message)
+        text_message = RegisterWindowMessageW(TEXT_MESSAGE);
     if (code == HC_ACTION)
     {
         const CWPSTRUCT *cwp = (const CWPSTRUCT *)lp;
 
         if (cwp->message == tooltip_message && tooltip_message)
             answer_tooltip(cwp->hwnd, cwp->wParam, (WCHAR *)cwp->lParam);
+        if (cwp->message == text_message && text_message)
+            answer_text(cwp->hwnd, (struct text_request *)cwp->lParam);
         switch (cwp->message)
         {
         case WM_ENTERMENULOOP:

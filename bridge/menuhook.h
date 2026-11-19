@@ -3,7 +3,8 @@
  * process, sends to the bridge with WM_COPYDATA. Menus cannot be read
  * from another process (GetMenuItemInfo fails with error 1400), so the
  * hook reads them where they live. Toolbar tooltips are asked for the
- * same way (TOOLTIP_MESSAGE).
+ * same way (TOOLTIP_MESSAGE), and so is the text of edit controls
+ * (TEXT_MESSAGE).
  *
  * Windows headers only; included by the hook DLL and the Win32 core.
  * Fixed-size fields, so a 32-bit hook can talk to the 64-bit bridge.
@@ -70,5 +71,38 @@ struct menu_record
  */
 #define TOOLTIP_MESSAGE L"WineAtspiToolTip"
 #define TOOLTIP_TEXT_MAX 256
+
+/*
+ * Registered message that the bridge sends to an Edit or RichEdit to get
+ * its text. A cross-process WM_GETTEXT costs about 20 ms per MB and never
+ * returns from about 1M UTF-16 units on, so the hook reads the text inside
+ * the target and hands over only what changed. wParam is 0, lParam the
+ * address of a struct text_request in the target (allocated by the
+ * bridge). The request is left alone if there is no hook.
+ *
+ * The hook keeps the last text it handed over for each window, numbered
+ * by a generation. If the bridge holds that generation, the reply is the
+ * change against it: units removed at start replaced by units inserted.
+ * Otherwise it is the whole text (TEXT_REPLY_FULL). The inserted units
+ * lie at data in the target until the next request for the window.
+ */
+#define TEXT_MESSAGE L"WineAtspiText"
+#define TEXT_REQUEST_TAG 0x51545854     /* set by the bridge */
+#define TEXT_REPLY_TAG 0x52545854       /* set by the hook when it answered */
+#define TEXT_REPLY_FULL 1               /* flags: data holds the whole text */
+
+struct text_request
+{
+    UINT32 tag;
+    UINT32 flags;           /* out */
+    UINT64 generation;      /* in: generation the bridge holds, 0 for none; out: the text's */
+    UINT32 length;          /* out: units of the whole text */
+    UINT32 start;           /* out: first changed unit */
+    UINT32 removed;         /* out: units of the old text replaced at start */
+    UINT32 inserted;        /* out: units of the new text at start */
+    UINT64 data;            /* out: address of the inserted units */
+    UINT32 sel_start;       /* out: EM_GETSEL */
+    UINT32 sel_end;
+};
 
 #endif

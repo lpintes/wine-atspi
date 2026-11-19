@@ -39,7 +39,7 @@ step() {
     timeout 30 wine $BUILD/sendkeys.exe.so f:Notepad w:300 "$@" w:1500
     got=$(python3 tests/atspi-text.py notepad 2>&1 | tail -n 1)
     echo "keys: $*" >> "$LOG"
-    tail -n +$((start + 1)) $BUILD/bridge.log | grep -a '^key check' >> "$LOG"
+    tail -n +$((start + 1)) $BUILD/bridge.log | grep -a -e '^key check' -e '^text:' >> "$LOG"
     echo "$got" >> "$LOG"
     if [ "$got" = "$want" ]; then
         echo "PASS: $*" >> "$LOG"

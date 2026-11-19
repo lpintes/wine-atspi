@@ -763,15 +763,33 @@ Found with large texts in notepad (`tests/perf-text.sh`,
   `reply_message` or ntdll's `send_request`). With the old cap of
   `1 << 20` a text that long gave no text at all (count 0, every key
   check 506 ms), so `TEXT_MAX_CHARS` is 1,000,000.
-- Text handling is therefore incomplete for large documents (books).
-  The cost grows linearly, about 30 ms per MB per key and per caret
-  move (also `SetCaretOffset` during say all), and text beyond
-  `TEXT_MAX_CHARS` is cut off. `char_offset` counts only within the
-  read part, so a caret past the cut lands at the end of the read text
-  and typing there is not seen (`tests/bridge-text-large.sh`, 1.5M
-  units: count 984375, Ctrl+End, Up and typing all give caret 984375;
-  the test expects the real values and fails until text is read in
-  ranges, `TODO.md`).
+- No cross-process message reads an `Edit`'s text from an offset
+  (`WM_GETTEXT` gives a prefix, `EM_GETLINE` one line; 24k lines take
+  about 18 s), and without the text before an offset unit positions
+  cannot be mapped to characters (`\r\n`, surrogates). `EM_GETHANDLE`
+  makes the buffer the application's (`hlocapp` in `user32/edit.c`).
+  So the hook DLL reads the text in the target: the bridge sends the
+  registered message `WineAtspiText` (`TEXT_MESSAGE` in `menuhook.h`),
+  the hook keeps the last text per window with a generation and answers
+  with the changed range against the bridge's generation (or the whole
+  text), the bridge reads only that with `ReadProcessMemory` in 1 MB
+  pieces and keeps its own copy (`hook_text` in `text.c`, `answer_text`
+  in `menuhook.c`). A 32-bit target (no hook) keeps the capped
+  cross-process `WM_GETTEXT`.
+- In the hook, `SendMessageW(WM_GETTEXT)` to its own `Edit` with 1.5M
+  units never answered; `CallWindowProcW` with the window's
+  `GWLP_WNDPROC` works. win32u passes a sent message to the window
+  procedure by `KeUserModeCallback`, user32's `CallWindowProcW` calls
+  it directly (`dlls/user32/winproc.c`). The exact limit was not looked
+  for.
+- With the hook, `tests/bridge-text-large.sh` (1.5M units) passes: 2
+  messages and 26-34 ms per key, typing "abc" carries 3 units. Most of
+  the time is now the rest of the core (`\r\n` strip, UTF-8,
+  `char_offset`) and the AT-SPI side (UCS-4, diff), which still handle
+  the whole text (measured: 1M units, cross-process `WM_GETTEXT` 15-22
+  ms, rest of the core about 10 ms, `set_text` 5-14 ms). Small texts got
+  slower (10 KB 9-10 ms, was 5-8 ms): each request opens the process and
+  allocates memory in it.
 
 Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
 2026-11-08).
