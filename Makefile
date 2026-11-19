@@ -37,7 +37,7 @@ CORE = main util object range text labels listview tab toolbar listbox treeview 
 	console statusbar wintree events menu keys script utf16
 CORE_OBJS = $(CORE:%=$(BUILD)/%.o)
 
-$(CORE_OBJS): $(BUILD)/%.o: bridge/%.c bridge/core.h bridge/bridge.h bridge/menuhook.h \
+$(CORE_OBJS): $(BUILD)/%.o: bridge/%.c bridge/core.h bridge/bridge.h bridge/wahook.h \
 		bridge/utf16.h | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) $(CORE_EXTRA) -c -o $@ $<
 
@@ -74,11 +74,11 @@ $(BUILD)/unit: tests/unit.c bridge/utf16.c bridge/utf16.h bridge/textrange.c \
 check: $(BUILD)/unit
 	$(BUILD)/unit
 
-# Menu hook: a PE DLL (mingw), because Wine loads it into PE targets.
-# 64-bit targets only for now.
+# Hook DLL (menus, tooltips, text): a PE DLL (mingw), because Wine loads
+# it into PE targets. 64-bit targets only for now.
 MINGW_CC ?= x86_64-w64-mingw32-gcc
 
-$(BUILD)/wine-atspi-hook.dll: bridge/menuhook.c bridge/menuhook.h | $(BUILD)
+$(BUILD)/wine-atspi-hook.dll: bridge/wahook.c bridge/wahook.h | $(BUILD)
 	$(MINGW_CC) -O2 -Wall -shared -static-libgcc -o $@ $< -luser32 -lkernel32
 
 $(BUILD)/probe.exe.so: probe/probe.c | $(BUILD)

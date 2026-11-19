@@ -91,7 +91,7 @@ static BOOL read_remote(HANDLE process, const char *addr, char *buf, SIZE_T size
 
 /*
  * Text of hwnd read by the hook DLL inside the target (TEXT_MESSAGE in
- * menuhook.h): only the change against the bridge's copy crosses the
+ * wahook.h): only the change against the bridge's copy crosses the
  * process. Returns a heap copy of the text of *len units and the EM_GETSEL
  * range, or NULL without the hook (32-bit target) or on an error.
  */

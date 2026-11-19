@@ -769,12 +769,12 @@ Found with large texts in notepad (`tests/perf-text.sh`,
   cannot be mapped to characters (`\r\n`, surrogates). `EM_GETHANDLE`
   makes the buffer the application's (`hlocapp` in `user32/edit.c`).
   So the hook DLL reads the text in the target: the bridge sends the
-  registered message `WineAtspiText` (`TEXT_MESSAGE` in `menuhook.h`),
+  registered message `WineAtspiText` (`TEXT_MESSAGE` in `wahook.h`),
   the hook keeps the last text per window with a generation and answers
   with the changed range against the bridge's generation (or the whole
   text), the bridge reads only that with `ReadProcessMemory` in 1 MB
   pieces and keeps its own copy (`hook_text` in `text.c`, `answer_text`
-  in `menuhook.c`). A 32-bit target (no hook) keeps the capped
+  in `wahook.c`). A 32-bit target (no hook) keeps the capped
   cross-process `WM_GETTEXT`.
 - In the hook, `SendMessageW(WM_GETTEXT)` to its own `Edit` with 1.5M
   units never answered; `CallWindowProcW` with the window's
@@ -1047,7 +1047,7 @@ Found with a 32-bit target (`tests/bridge-controls32.sh`, Wine 11.21,
 
 - **Build in Arch WSL** (distro `archlinux`), using `winegcc` from the
   `wine` package, and `x86_64-w64-mingw32-gcc` (`mingw-w64-gcc`) for the
-  menu hook DLL `build/wine-atspi-hook.dll`, which must lie next to
+  hook DLL `build/wine-atspi-hook.dll`, which must lie next to
   `wine-atspi.exe`. The source lives on the Windows side at
   `C:\vcs\github.com\lpintes\wine-atspi` (`/mnt/c/vcs/github.com/lpintes/wine-atspi`
   in WSL).

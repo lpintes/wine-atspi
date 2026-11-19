@@ -26,7 +26,7 @@
 #include <winternl.h>
 
 #include "bridge.h"
-#include "menuhook.h"
+#include "wahook.h"
 #include "utf16.h"
 
 #define NAME_MAX_UTF8 1024

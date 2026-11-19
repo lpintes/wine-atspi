@@ -1,9 +1,9 @@
 /*
- * wine-atspi menu hook: a PE DLL that the bridge installs as a global
+ * wine-atspi hook DLL: a PE DLL that the bridge installs as a global
  * WH_CALLWNDPROC hook, so Wine loads it into every GUI process of the
  * prefix (user32/hook.c, get_hook_proc). It watches the menu messages
  * that Wine sends to the menu owner and reports each highlighted item to
- * the bridge as a struct menu_record (menuhook.h) by WM_COPYDATA. It also
+ * the bridge as a struct menu_record (wahook.h) by WM_COPYDATA. It also
  * answers the bridge's TOOLTIP_MESSAGE for toolbar buttons and TEXT_MESSAGE
  * for the text of Edit and RichEdit controls.
  *
@@ -13,7 +13,7 @@
 #include <windows.h>
 #include <commctrl.h>
 
-#include "menuhook.h"
+#include "wahook.h"
 
 /* The target's menu loop waits for the bridge this long at most. */
 #define SEND_TIMEOUT_MS 200
@@ -352,7 +352,7 @@ static BOOL is_text_class(HWND hwnd)
 /*
  * Reads the text of an Edit or RichEdit in its own thread, where
  * WM_GETTEXT has no size limit, and answers req with the change against
- * the copy the bridge holds (TEXT_MESSAGE in menuhook.h).
+ * the copy the bridge holds (TEXT_MESSAGE in wahook.h).
  */
 static void answer_text(HWND hwnd, struct text_request *req)
 {

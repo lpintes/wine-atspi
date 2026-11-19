@@ -23,7 +23,7 @@ struct tbbuttoninfo32
  * Tooltip of a button without text, the only name most icon buttons have.
  * The toolbar gets it from its owner by WM_NOTIFY, which Wine refuses
  * across processes, so the hook DLL asks inside the target
- * (TOOLTIP_MESSAGE in menuhook.h). Without the hook (32-bit target) the
+ * (TOOLTIP_MESSAGE in wahook.h). Without the hook (32-bit target) the
  * text stays empty.
  */
 static void get_toolbar_tooltip(HWND hwnd, struct remote *r, int command, WCHAR *text)

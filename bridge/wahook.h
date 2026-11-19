@@ -1,5 +1,5 @@
 /*
- * Records that the menu hook DLL (menuhook.c), running inside a target
+ * Records that the hook DLL (wahook.c), running inside a target
  * process, sends to the bridge with WM_COPYDATA. Menus cannot be read
  * from another process (GetMenuItemInfo fails with error 1400), so the
  * hook reads them where they live. Toolbar tooltips are asked for the
@@ -9,8 +9,8 @@
  * Windows headers only; included by the hook DLL and the Win32 core.
  * Fixed-size fields, so a 32-bit hook can talk to the 64-bit bridge.
  */
-#ifndef WINE_ATSPI_MENUHOOK_H
-#define WINE_ATSPI_MENUHOOK_H
+#ifndef WINE_ATSPI_WAHOOK_H
+#define WINE_ATSPI_WAHOOK_H
 
 #include <windows.h>
 

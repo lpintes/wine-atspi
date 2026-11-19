@@ -1,13 +1,13 @@
 /*
  * wine-atspi bridge, Win32 core: menus, reported by the hook DLL
- * (menuhook.c).
+ * (wahook.c).
  */
 #include "core.h"
 
 struct menu_state menu;
 
 /*
- * Menus. The hook DLL (menuhook.c) reports each highlighted item; menu
+ * Menus. The hook DLL (wahook.c) reports each highlighted item; menu
  * focus lives only on the AT-SPI side, last_focus keeps the control that
  * gets focus back when the menu ends. Records wait MENU_SETTLE_MS, so that
  * only the last of a burst is reported: Right on an open menu gives the
@@ -239,7 +239,7 @@ static BOOL load_menu_hook(void)
     if (!(menu_module = LoadLibraryW(path)) ||
         !(menu_proc = (HOOKPROC)GetProcAddress(menu_module, "CallWndProc")))
     {
-        trace(L"no menu hook: cannot load %s", path);
+        trace(L"no hook DLL: cannot load %s", path);
         return FALSE;
     }
     return TRUE;
@@ -253,7 +253,7 @@ HHOOK install_menu_hook(void)
     if (!load_menu_hook())
         return NULL;
     hook = SetWindowsHookExW(WH_CALLWNDPROC, menu_proc, menu_module, 0);
-    trace(L"menu hook: %p", hook);
+    trace(L"hook DLL: %p", hook);
     return hook;
 }
 
