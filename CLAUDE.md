@@ -788,8 +788,9 @@ Found with large texts in notepad (`tests/perf-text.sh`,
   `char_offset`) and the AT-SPI side (UCS-4, diff), which still handle
   the whole text (measured: 1M units, cross-process `WM_GETTEXT` 15-22
   ms, rest of the core about 10 ms, `set_text` 5-14 ms). Small texts got
-  slower (10 KB 9-10 ms, was 5-8 ms): each request opens the process and
-  allocates memory in it.
+  slower (10 KB 9-10 ms, was 5-8 ms). Opening the process and allocating
+  the block per request is not the cause: keeping one block per process
+  across keys changed nothing (10 KB 7-8 ms, 2026-11-19; not kept).
 - Since then the core hands the AT-SPI side a shared, unchanging
   `struct bridge_text` (code points, reference counted by the core's
   `bridge_text_ref` / `bridge_text_unref`, since the AT-SPI side cannot
