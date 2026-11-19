@@ -194,6 +194,14 @@ static int run_bridge(BOOL service, BOOL always_on)
                 }
                 continue;
             }
+            /* A caret moved without a key: look again as after a key. */
+            if (!msg.hwnd && msg.message == WM_TEXT_SELECTED)
+            {
+                trace(L"text selected in %p", (HWND)msg.wParam);
+                key_retries = 0;
+                key_timer = SetTimer(NULL, key_timer, KEY_CHECK_DELAY_MS, check_after_key);
+                continue;
+            }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

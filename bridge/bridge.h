@@ -327,6 +327,17 @@ int bridge_text_line(unsigned long long hwnd, const unsigned int *chars, int cou
                      int offset, int *start, int *end);
 
 /*
+ * Selects the characters start up to end (exclusive) of the text control
+ * hwnd, with chars and count as for bridge_text_extents, and puts the
+ * caret at end; start == end only moves the caret. The control scrolls
+ * it into view. Does not wait for the program; the Win32 side reads the
+ * focus again shortly after, which reports the new caret and selection.
+ * Returns 0 if hwnd is no Edit or RichEdit or an offset is out of range.
+ */
+int bridge_text_select(unsigned long long hwnd, const unsigned int *chars, int count,
+                       int start, int end);
+
+/*
  * Clicks the button hwnd (push button, check box, radio button) as a
  * mouse click would, without moving the mouse. Does not wait for the
  * program to handle it. Returns 0 if hwnd is no enabled button.

@@ -772,6 +772,16 @@ Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
   wraps. The character after a wrapped line starts the next line, so
   `text_line_end` gives such a line the average character width.
   `tests/bridge-text-wrap.sh` (2026-11-19).
+- Orca moves the caret itself with `Text.SetCaretOffset` (flat review,
+  braille routing, say all) and the selection with `SetSelection` /
+  `AddSelection`. The bridge posts `EM_SETSEL` (`bridge_text_select`):
+  Wine's `Edit` keeps the caret at `lParam` even before `wParam` and
+  scrolls to it (`EDIT_EM_SetSel` in `user32/edit.c`); a RichEdit orders
+  the two and puts the caret at the end (`set_selection_cursors` in
+  `riched20/caret.c`) and scrolls as well. No WinEvent tells of the
+  move, so the main thread then runs the key check (`WM_TEXT_SELECTED`).
+  `tests/bridge-text-select.sh` (notepad, wordpad, 2026-11-19); not yet
+  heard with Orca.
 
 Found with the menu hook (`build/exp-menu/`, `tests/bridge-menu.sh`,
 Wine 11.21, 2026-11-08).

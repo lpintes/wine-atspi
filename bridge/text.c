@@ -185,6 +185,32 @@ int bridge_text_line(unsigned long long handle, const unsigned int *chars, int c
     return 1;
 }
 
+int bridge_text_select(unsigned long long handle, const unsigned int *chars, int count,
+                       int start, int end)
+{
+    HWND hwnd = (HWND)(ULONG_PTR)handle;
+    WCHAR cls[64];
+    BOOL rich;
+
+    if (!chars || !hwnd || start < 0 || end < 0 || start > count || end > count ||
+        !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || !has_edit_text(cls))
+        return 0;
+    rich = lstrcmpiW(cls, L"Edit") != 0;
+    /*
+     * Wine's Edit keeps the caret at lParam, also before wParam, and
+     * scrolls to it (EDIT_EM_SetSel, EDIT_EM_ScrollCaret in user32/edit.c);
+     * a RichEdit orders the two and puts the caret at the end
+     * (set_selection_cursors in riched20/caret.c). Posted, like a key: the
+     * AT-SPI thread must not wait for a busy target. No WinEvent tells of
+     * the caret, so the main thread looks after the target handled it.
+     */
+    if (!PostMessageW(hwnd, EM_SETSEL, control_index(chars, count, start, rich),
+                      control_index(chars, count, end, rich)))
+        return 0;
+    PostThreadMessageW(main_thread_id, WM_TEXT_SELECTED, (WPARAM)hwnd, 0);
+    return 1;
+}
+
 int bridge_text_extents(unsigned long long handle, const unsigned int *chars, int count,
                         int start, int end, int *rect)
 {

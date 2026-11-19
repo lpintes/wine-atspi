@@ -737,10 +737,39 @@ static GVariant *text_method(struct node *node, const char *method, GVariant *pa
     }
     if (!g_strcmp0(method, "GetOffsetAtPoint"))
         return g_variant_new("(i)", -1);
-    /* Changing the caret or selection would need the Win32 thread; not yet. */
-    if (!g_strcmp0(method, "SetCaretOffset") || !g_strcmp0(method, "AddSelection") ||
-        !g_strcmp0(method, "RemoveSelection") || !g_strcmp0(method, "SetSelection") ||
-        !g_strcmp0(method, "ScrollSubstringTo") || !g_strcmp0(method, "ScrollSubstringToPoint"))
+    /*
+     * A Win32 text control has one selection, so like a GTK 3 entry there
+     * is at most selection 0. The new caret comes back with the next read
+     * of the focus, not here.
+     */
+    if (!g_strcmp0(method, "SetCaretOffset"))
+    {
+        g_variant_get(params, "(i)", &offset);
+        return g_variant_new("(b)", bridge_text_select(node->hwnd, node->chars, node->count,
+                                                       offset, offset));
+    }
+    if (!g_strcmp0(method, "AddSelection"))
+    {
+        g_variant_get(params, "(ii)", &start, &end);
+        return g_variant_new("(b)", node->selection_start == node->selection_end &&
+                                        bridge_text_select(node->hwnd, node->chars,
+                                                           node->count, start, end));
+    }
+    if (!g_strcmp0(method, "SetSelection"))
+    {
+        g_variant_get(params, "(iii)", &offset, &start, &end);
+        return g_variant_new("(b)", offset == 0 && bridge_text_select(node->hwnd, node->chars,
+                                                                      node->count, start, end));
+    }
+    if (!g_strcmp0(method, "RemoveSelection"))
+    {
+        g_variant_get(params, "(i)", &offset);
+        return g_variant_new("(b)", offset == 0 &&
+                                        node->selection_start != node->selection_end &&
+                                        bridge_text_select(node->hwnd, node->chars, node->count,
+                                                           node->caret, node->caret));
+    }
+    if (!g_strcmp0(method, "ScrollSubstringTo") || !g_strcmp0(method, "ScrollSubstringToPoint"))
         return g_variant_new("(b)", FALSE);
     return NULL;
 }

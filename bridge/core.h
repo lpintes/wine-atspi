@@ -210,6 +210,8 @@ struct menu_state
 #define WM_LISTENING (WM_APP + 2)
 /* Sent to the main thread when the a11y bus is (again) usable, see bridge_bus_ready. */
 #define WM_BUS_READY (WM_APP + 3)
+/* Sent to the main thread when a screen reader moved a caret, see bridge_text_select. */
+#define WM_TEXT_SELECTED (WM_APP + 4)
 
 /*
  * Wine emits no WinEvent when a key changes a combo box, a list box
