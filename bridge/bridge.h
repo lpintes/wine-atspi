@@ -316,6 +316,17 @@ int bridge_text_extents(unsigned long long hwnd, const unsigned int *chars, int 
                         int start, int end, int *rect);
 
 /*
+ * Line [*start, *end) at offset of the text control hwnd as it shows it,
+ * with chars and count as for bridge_text_extents. A line runs to the
+ * start of the next one, so a wrapped line keeps its trailing spaces and
+ * a line ending in a break includes the "\n". Returns 0 if hwnd does not
+ * wrap lines (single-line, or an Edit that scrolls sideways), so that the
+ * caller can split chars at "\n" itself.
+ */
+int bridge_text_line(unsigned long long hwnd, const unsigned int *chars, int count,
+                     int offset, int *start, int *end);
+
+/*
  * Clicks the button hwnd (push button, check box, radio button) as a
  * mouse click would, without moving the mouse. Does not wait for the
  * program to handle it. Returns 0 if hwnd is no enabled button.

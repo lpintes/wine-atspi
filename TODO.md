@@ -37,8 +37,7 @@ Toolbars:
 
 Controls:
 
-- `Edit`: lines are logical (no soft wrap), the whole text is re-read
-  after each key, no `SetCaretOffset`.
+- `Edit`: the whole text is re-read after each key, no `SetCaretOffset`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
 - Tabs: `TCS_BUTTONS` untested.
 - 32-bit targets: a cross-process message costs about twice as much

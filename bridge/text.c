@@ -127,22 +127,62 @@ static int text_line_height(HWND hwnd, int first_visible, int lines, const RECT 
 /*
  * Client x just after the last character of the line holding index; len
  * is the length of the whole text. A line break has the position of that
- * end; the last line has none, so its last character gets the average
- * width of the line.
+ * end; the last line and a wrapped one have none (the next character
+ * starts the next line), so their last character gets the average width
+ * of the line.
  */
 static int text_line_end(HWND hwnd, int index, int len, int height)
 {
-    int start = text_send(hwnd, EM_LINEINDEX, text_send(hwnd, EM_LINEFROMCHAR, index));
+    int line = text_send(hwnd, EM_LINEFROMCHAR, index);
+    int start = text_send(hwnd, EM_LINEINDEX, line);
     int end = start + text_send(hwnd, EM_LINELENGTH, index);
     POINT first, last;
 
-    if (end < len && text_pos(hwnd, end, &last))
+    if (end < len && text_send(hwnd, EM_LINEFROMCHAR, end) == line && text_pos(hwnd, end, &last))
         return last.x;
     if (end <= start || !text_pos(hwnd, end - 1, &last))
         return 0;
     if (end - 1 > start && text_pos(hwnd, start, &first) && last.x > first.x)
         return last.x + (last.x - first.x) / (end - 1 - start);
     return last.x + height / 2;
+}
+
+int bridge_text_line(unsigned long long handle, const unsigned int *chars, int count,
+                     int offset, int *start, int *end)
+{
+    HWND hwnd = (HWND)(ULONG_PTR)handle;
+    DWORD_PTR line, first, next, lines;
+    WCHAR cls[64];
+    LONG style;
+    BOOL rich;
+
+    if (!chars || !hwnd || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || !has_edit_text(cls))
+        return 0;
+    rich = lstrcmpiW(cls, L"Edit") != 0;
+    style = GetWindowLongW(hwnd, GWL_STYLE);
+    /*
+     * Wine's Edit wraps a multi-line text unless ES_AUTOHSCROLL
+     * (user32/edit.c); whether a RichEdit wraps is up to its host
+     * (TXTBIT_WORDWRAP, EM_SETTARGETDEVICE), so ask any multi-line one.
+     */
+    if (!(style & ES_MULTILINE) || (!rich && (style & ES_AUTOHSCROLL)))
+        return 0;
+    offset = max(0, min(offset, count));
+    if (!send_message(hwnd, EM_LINEFROMCHAR, control_index(chars, count, offset, rich), 0,
+                      SEND_TIMEOUT_MS, &line) ||
+        !send_message(hwnd, EM_GETLINECOUNT, 0, 0, SEND_TIMEOUT_MS, &lines) ||
+        !send_message(hwnd, EM_LINEINDEX, line, 0, SEND_TIMEOUT_MS, &first) ||
+        (int)first < 0)
+        return 0;
+    if (line + 1 >= lines ||
+        !send_message(hwnd, EM_LINEINDEX, line + 1, 0, SEND_TIMEOUT_MS, &next) || (int)next < 0)
+        next = (DWORD_PTR)control_index(chars, count, count, rich);
+    *start = control_offset(chars, count, (int)first, rich);
+    *end = control_offset(chars, count, (int)next, rich);
+    /* The text may have changed since chars was read; keep offset in its line. */
+    if (*start > offset || *end < offset || (*end == offset && offset < count))
+        return 0;
+    return 1;
 }
 
 int bridge_text_extents(unsigned long long handle, const unsigned int *chars, int count,

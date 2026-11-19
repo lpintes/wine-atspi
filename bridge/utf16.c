@@ -63,6 +63,24 @@ int control_index(const unsigned int *chars, int count, int offset, int rich)
     return index;
 }
 
+/*
+ * AT-SPI offset in chars of the control index, the inverse of
+ * control_index. An index inside a "\r\n" or a surrogate pair gives the
+ * offset of that character; an index past the end gives count.
+ */
+int control_offset(const unsigned int *chars, int count, int index, int rich)
+{
+    int i, pos = 0;
+
+    for (i = 0; i < count; i++)
+    {
+        pos += (chars[i] > 0xffff ? 2 : 1) + (!rich && chars[i] == '\n');
+        if (pos > index)
+            return i;
+    }
+    return count;
+}
+
 /* Drops the "&" that marks a mnemonic; "&&" stays as one "&". */
 void strip_ampersands(utf16 *buf)
 {

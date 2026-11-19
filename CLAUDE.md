@@ -760,6 +760,18 @@ Found with the bridge and Wine's wordpad (`tests/bridge-wordpad.sh`,
   read the text again after each key.
 - The test prefix has no `App Paths` entry for wordpad, so `wine wordpad`
   fails; start `C:\Program Files\Windows NT\Accessories\wordpad.exe`.
+- Wrapped lines: `WM_GETTEXT` has no soft breaks (without
+  `EM_FMTLINES`), so for `Text` lines the AT-SPI thread asks the control
+  (`bridge_text_line`: `EM_LINEFROMCHAR`, `EM_LINEINDEX` of that line
+  and the next; a line runs to the next one's start, trailing space
+  included). Wine's `Edit` wraps a multi-line text unless
+  `ES_AUTOHSCROLL` (`user32/edit.c`); notepad's word wrap is HKCU
+  `Software\Microsoft\Notepad` `fWrap`, on by default. Whether a
+  RichEdit wraps is up to its host (`TXTBIT_WORDWRAP`,
+  `EM_SETTARGETDEVICE`), so every multi-line RichEdit is asked; wordpad
+  wraps. The character after a wrapped line starts the next line, so
+  `text_line_end` gives such a line the average character width.
+  `tests/bridge-text-wrap.sh` (2026-11-19).
 
 Found with the menu hook (`build/exp-menu/`, `tests/bridge-menu.sh`,
 Wine 11.21, 2026-11-08).

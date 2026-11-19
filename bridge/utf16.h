@@ -18,6 +18,7 @@ typedef unsigned short utf16;
 int char_offset(const utf16 *text, int len, int pos);
 int rich_text_index(const utf16 *text, int len, int pos);
 int control_index(const unsigned int *chars, int count, int offset, int rich);
+int control_offset(const unsigned int *chars, int count, int index, int rich);
 void strip_ampersands(utf16 *buf);
 utf16 *split_menu_text(utf16 *buf);
 

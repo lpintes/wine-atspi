@@ -599,6 +599,10 @@ static char *text_slice(struct node *node, gint start, gint end)
 static void node_text_range(struct node *node, gint offset, guint granularity,
                             gint *start, gint *end)
 {
+    /* A wrapping text control knows where its lines break. */
+    if (granularity == GRANULARITY_LINE && node->hwnd && !node->placeholder &&
+        bridge_text_line(node->hwnd, node->chars, node->count, offset, start, end))
+        return;
     text_range(node->chars, node->count, offset, granularity, start, end);
 }
 

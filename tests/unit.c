@@ -119,9 +119,19 @@ static void test_control_index(void)
     CHECK_INT(control_index(U"a\U0001F600b", 3, 3, 0), 4);
     CHECK_INT(control_index(U"ab", 2, 9, 0), 2);
 
+    CHECK_INT(control_offset(U"a\nb", 3, 1, 0), 1);
+    CHECK_INT(control_offset(U"a\nb", 3, 2, 0), 1);
+    CHECK_INT(control_offset(U"a\nb", 3, 3, 0), 2);
+    CHECK_INT(control_offset(U"a\nb", 3, 2, 1), 2);
+    CHECK_INT(control_offset(U"a\U0001F600b", 3, 2, 0), 1);
+    CHECK_INT(control_offset(U"a\U0001F600b", 3, 3, 0), 2);
+    CHECK_INT(control_offset(U"ab", 2, 9, 0), 2);
+
     /* Round trips: AT-SPI offset -> control index -> AT-SPI offset. */
     for (k = 0; k <= count; k++)
     {
+        CHECK_INT(control_offset(chars, count, control_index(chars, count, k, 0), 0), k);
+        CHECK_INT(control_offset(chars, count, control_index(chars, count, k, 1), 1), k);
         CHECK_INT(char_offset(T(text), len, control_index(chars, count, k, 0)), k);
         CHECK_INT(char_offset(T(text), len,
                               rich_text_index(T(text), len, control_index(chars, count, k, 1))),
