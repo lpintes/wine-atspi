@@ -434,7 +434,12 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   the style given at creation (`TREEVIEW_Paint`). The bridge gives the
   item `checkable` and `checked`, as NVDA, Firefox and Chromium expose
   such an item; decided (2026-11-18): no workaround for Orca
-  (`tests/bridge-controls.sh`, "Places").
+  (`tests/bridge-controls.sh`, "Places"). Firefox with an ARIA
+  `treeitem` and `aria-checked` shows the same in Orca 51.1 (after
+  Space it says only "blank"); reported as GNOME/orca#777
+  (https://gitlab.gnome.org/GNOME/orca/-/work_items/777, 2026-11-19).
+  GNOME's CDN answers an API post whose text holds `<script>` with an
+  empty 406; attach such a file through the uploads API instead.
 - For a focused page tab Orca says name and role only ("General
   karta"): `_generate_ancestors` returns nothing when the new focus is a
   page tab, so the page tab list and its label are never spoken, as in
