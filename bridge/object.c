@@ -585,7 +585,25 @@ void describe_frame(HWND hwnd, struct bridge_object *obj,
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SENSITIVE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_VISIBLE) |
                   BRIDGE_STATE_BIT(BRIDGE_STATE_SHOWING);
-    get_window_text(hwnd, str->frame, sizeof(str->frame));
+    get_frame_text(hwnd, str->frame, sizeof(str->frame));
     obj->name = str->frame;
     get_extents(hwnd, obj);
+}
+
+/*
+ * Title of a top-level window. DefWindowProc keeps a window's text on
+ * the server (WM_NCCREATE and WM_SETTEXT, win32u/defwnd.c), and
+ * InternalGetWindowText reads it from there for a window of another
+ * process without a message, so a target busy creating the window does
+ * not delay its focus (winecfg's frame waited 190 ms for WM_GETTEXT).
+ * A window that keeps its text itself has none there and is asked.
+ */
+void get_frame_text(HWND hwnd, char *dst, int size)
+{
+    WCHAR buf[NAME_MAX_UTF8 / 3];
+
+    if (InternalGetWindowText(hwnd, buf, ARRAYSIZE(buf)) > 0)
+        to_utf8(buf, dst, size);
+    else
+        get_window_text(hwnd, dst, size);
 }

@@ -398,8 +398,14 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   (a property sheet page, the Open dialog's file list panel) as
   `ancestors`, described like the tree does (`describe_ancestors` in
   `wintree.c`). Most of the rest of a new window's delay is the target
-  still busy creating it (Open dialog focus 120-300 ms, winecfg's frame
-  name 190 ms for one `WM_GETTEXT`).
+  still busy creating it (Open dialog focus 120-300 ms). winecfg's
+  frame name took 190 ms for one `WM_GETTEXT`; `DefWindowProc` keeps a
+  window's text on the server (`WM_NCCREATE`, `WM_SETTEXT` in
+  `win32u/defwnd.c`) and `InternalGetWindowText` reads it from there
+  without a message (`get_server_window_text` in `win32u/window.c`), so
+  the frame name is read so (`get_frame_text` in `object.c`), and asked
+  with `WM_GETTEXT` only when empty. winecfg's first focus now sends no
+  message and has its title (`tests/bridge-propsheet.sh`, 2026-11-20).
 - For a `list box` Orca says "list with n available items" instead of
   "n items" when fewer than `setsize` children are sensitive
   (`_generate_number_of_children`, `get_sensitive_child_count`; above 50

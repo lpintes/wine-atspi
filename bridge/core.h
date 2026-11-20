@@ -258,6 +258,7 @@ BOOL describe_object(HWND hwnd, LONG id_object, LONG id_child,
                      struct bridge_object *obj, struct focus_strings *str);
 void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
 void describe_frame(HWND hwnd, struct bridge_object *obj, struct focus_strings *str);
+void get_frame_text(HWND hwnd, char *dst, int size);
 HWND outer_combo(HWND hwnd);
 HWND combo_edit(HWND combo);
 

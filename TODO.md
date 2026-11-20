@@ -18,11 +18,6 @@ Window tree (object navigation, flat review):
 - `Action` for other objects than Win32 buttons (list items, tabs, combo
   boxes, toolbar buttons), if Orca's mouse click fallback is not good
   enough.
-- A new window's frame name is read with `WM_GETTEXT`, which waits for
-  a target still busy creating the window (winecfg: 190 ms).
-  `InternalGetWindowText` reads it from the server without a message
-  (`NtUserInternalGetWindowText` in `win32u/window.c`); check that the
-  title is already set at the first focus.
 - A focused list without a focused item is described by MSAA in the
   focus but by `describe_container` in the tree, so its name or role may
   flip on each refresh. Not seen.
