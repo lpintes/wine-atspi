@@ -137,6 +137,7 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
 {
     struct bridge_focus focus;
     struct focus_strings str, *combo_str = NULL;
+    struct bridge_object ancestors[MAX_ANCESTORS];
     HWND top = GetAncestor(hwnd, GA_ROOT), combo;
     DWORD pid = 0, start = GetTickCount();
     ULONG sent = send_count;
@@ -176,6 +177,14 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
              (combo_str = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*combo_str))) &&
              !describe_object(combo, OBJID_CLIENT, CHILDID_SELF, &focus.container, combo_str))
         memset(&focus.container, 0, sizeof(focus.container));
+    /* The tree comes after the focus; until then the focus has its parents. */
+    if (focus.object.hwnd != (ULONG_PTR)top)
+    {
+        focus.ancestor_count = describe_ancestors(
+            top, focus.container.hwnd ? (HWND)(ULONG_PTR)focus.container.hwnd : hwnd,
+            ancestors, MAX_ANCESTORS);
+        focus.ancestors = ancestors;
+    }
     GetWindowThreadProcessId(hwnd, &pid);
     /* A console window belongs to conhost.exe; the application is its program. */
     if (focus.object.role == BRIDGE_ROLE_TERMINAL && console_client.hwnd == hwnd)
@@ -184,21 +193,20 @@ void on_focus(HWND hwnd, LONG id_object, LONG id_child)
     get_app_name(pid, str.app, sizeof(str.app));
     focus.app_name = str.app;
     watch_process(pid);
-    /*
-     * Before the focus, so that the focused object gets its tree parent.
-     * Without items, which would delay the speech (controls.c: 45 instead
-     * of 190 ms); they follow right after it.
-     */
-    if (top != tree_top)
-    {
-        tree_top = top;
-        report_tree(top, NULL, FALSE);
-        tree_timer = SetTimer(NULL, tree_timer, 0, refresh_tree);
-    }
     atspi_post_focus(&focus);
     trace(L"focus:%p %ld %ld name \"%S\" %d of %d level %d (%lu messages, %lu ms)", hwnd,
           id_object, id_child, focus.object.name, focus.object.position, focus.object.set_size,
           focus.object.level, send_count - sent, GetTickCount() - start);
+    /*
+     * The tree of a new window after the focus, which it would delay by
+     * 7-80 ms (controls.c: 80 ms, the Open dialog 50 ms; 2026-11-20).
+     */
+    if (top != tree_top)
+    {
+        tree_top = top;
+        tree_timer = SetTimer(NULL, tree_timer, 0, refresh_tree);
+    }
+    free_ancestors(ancestors, focus.ancestor_count);
     free_strings(&str);
     if (combo_str)
     {

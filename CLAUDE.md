@@ -384,10 +384,22 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   focused item as a list box. Speaking "x of y" for items is off by
   default (`speech_presenter.py`, `speak-position-in-set`).
 - On a focus change Orca speaks the new ancestors (`_generate_ancestors`
-  in `speech_generator.py`), but skips `list`, `panel`, `table` and
-  other context roles unless enabled in its settings
+  in `speech_generator.py`), but skips `list`, `table` and other
+  context roles unless enabled in its settings
   (`_get_enabled_and_disabled_context_roles`); a `list box` ancestor is
-  spoken.
+  spoken. `panel` and `grouping` are enabled by default
+  (`announce-grouping`, `speech_presenter.py`), so a named panel is
+  spoken (checked 2026-11-20).
+- The window tree of a new top-level window comes after its focus
+  (`refresh_tree` on a timer in `on_focus`): it took 7-80 ms before the
+  speech (`tests/controls.c` first focus 129 -> 38-51 ms, 2026-11-20).
+  So that the focus has its parents meanwhile, it carries the windows
+  between its control and the top window that the tree makes nodes of
+  (a property sheet page, the Open dialog's file list panel) as
+  `ancestors`, described like the tree does (`describe_ancestors` in
+  `wintree.c`). Most of the rest of a new window's delay is the target
+  still busy creating it (Open dialog focus 120-300 ms, winecfg's frame
+  name 190 ms for one `WM_GETTEXT`).
 - For a `list box` Orca says "list with n available items" instead of
   "n items" when fewer than `setsize` children are sensitive
   (`_generate_number_of_children`, `get_sensitive_child_count`; above 50

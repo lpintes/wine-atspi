@@ -329,6 +329,60 @@ void report_tree(HWND top, HWND control, BOOL items)
     HeapFree(heap, 0, b.objects);
 }
 
+/*
+ * The windows between hwnd and top that the tree makes nodes of (a
+ * property sheet page, a toolbar), outermost first, as the tree
+ * describes them; free them with free_ancestors. Sent with a focus that
+ * comes before the tree, so that the focus has its parents: Orca speaks
+ * a named panel as an ancestor. 0 if a window between is none of the
+ * tree's nodes or did not answer: the tree has no place for hwnd then.
+ */
+int describe_ancestors(HWND top, HWND hwnd, struct bridge_object *objs, int max)
+{
+    HANDLE heap = GetProcessHeap();
+    struct focus_strings *str = HeapAlloc(heap, HEAP_ZERO_MEMORY, sizeof(*str));
+    HWND chain[MAX_ANCESTORS], parent;
+    WCHAR cls[256];
+    int depth = 0, count = 0, i;
+
+    if (!str)
+        return 0;
+    for (parent = GetParent(hwnd); parent && parent != top; parent = GetParent(parent))
+    {
+        if (depth == max || depth == MAX_ANCESTORS || !IsWindowVisible(parent) ||
+            !GetClassNameW(parent, cls, ARRAYSIZE(cls)) || tree_kind(parent, cls) != TREE_NODE)
+            goto fail;
+        chain[depth++] = parent;
+    }
+    if (!parent)
+        goto fail;
+    for (i = depth - 1; i >= 0; i--)
+    {
+        GetClassNameW(chain[i], cls, ARRAYSIZE(cls));
+        if (!describe_tree_window(chain[i], cls, &objs[count], str))
+        {
+            free_strings(str);
+            goto fail;
+        }
+        keep_strings(&objs[count++]);
+        free_strings(str);
+    }
+    HeapFree(heap, 0, str);
+    return count;
+fail:
+    free_ancestors(objs, count);
+    HeapFree(heap, 0, str);
+    return 0;
+}
+
+void free_ancestors(struct bridge_object *objs, int count)
+{
+    int i;
+
+    for (i = 0; i < count; i++)
+        free_kept_strings(&objs[i]);
+}
+
 void CALLBACK refresh_tree(HWND unused, UINT msg, UINT_PTR id, DWORD time)
 {
     KillTimer(NULL, id);

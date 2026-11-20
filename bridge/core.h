@@ -317,6 +317,9 @@ extern UINT_PTR tree_timer;
 struct bridge_object *tree_item_slot(struct tree_build *b);
 BOOL tree_item_done(struct tree_build *b, BOOL described);
 void report_tree(HWND top, HWND control, BOOL items);
+#define MAX_ANCESTORS 8
+int describe_ancestors(HWND top, HWND hwnd, struct bridge_object *objs, int max);
+void free_ancestors(struct bridge_object *objs, int count);
 void CALLBACK refresh_tree(HWND unused, UINT msg, UINT_PTR id, DWORD time);
 void schedule_tree(HWND hwnd);
 void schedule_items(HWND hwnd);
