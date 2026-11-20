@@ -655,7 +655,13 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   reports the hot button as the focus and follows it after each key
   (`toolbar_focus`). A toolbar answers `WM_GETDLGCODE` with 0, so
   `IsDialogMessage` takes its arrow keys; `tests/controls.c` subclasses
-  it. Confirmed with Orca on `tests/controls.c` (2026-11-10).
+  it. Confirmed with Orca on `tests/controls.c` (2026-11-10). The
+  command of Space may change other buttons (controls.c's Bold enables
+  Undo), so after a key the toolbar's buttons are read again like a
+  list's items; such an update removes only nodes with the control's
+  hwnd, so windows on the toolbar (wordpad's font combo boxes, the
+  Static 'Zoom 100 %' in controls.c) stay (`collect_tree_ids`;
+  `tests/bridge-controls.sh`, 2026-11-20).
 - A window that appears without a key does not interrupt speech: notepad
   started from a terminal is spoken only after the queued terminal
   output. Orca sets the new frame as locus of focus through

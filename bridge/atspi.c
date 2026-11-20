@@ -2258,8 +2258,12 @@ static gboolean value_idle(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-/* Adds the ids of the nodes below node that came from a window tree. */
-static void collect_tree_ids(struct node *node, GPtrArray *ids)
+/*
+ * Adds the ids of the nodes below node that came from a window tree;
+ * with hwnd, only those of that window (the items of a control, not the
+ * windows on a toolbar).
+ */
+static void collect_tree_ids(struct node *node, guint64 hwnd, GPtrArray *ids)
 {
     guint i;
 
@@ -2267,11 +2271,11 @@ static void collect_tree_ids(struct node *node, GPtrArray *ids)
     {
         struct node *child = node->children->pdata[i];
 
-        if (!child)
+        if (!child || (hwnd && child->hwnd != hwnd))
             continue;
         if (child->in_tree)
             g_ptr_array_add(ids, g_strdup(child->id));
-        collect_tree_ids(child, ids);
+        collect_tree_ids(child, hwnd, ids);
     }
 }
 
@@ -2366,7 +2370,7 @@ static gboolean tree_idle(gpointer data)
     }
     /* Ids, not nodes: removing one node may free others as its subtree. */
     old = g_ptr_array_new_with_free_func(g_free);
-    collect_tree_ids(root, old);
+    collect_tree_ids(root, t->control, old);
     for (j = 0; j < old->len; j++)
         ((struct node *)g_hash_table_lookup(app->nodes, old->pdata[j]))->in_tree = FALSE;
 

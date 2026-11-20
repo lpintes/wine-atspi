@@ -26,9 +26,6 @@ Toolbars:
 
 - A toolbar that is neither flat nor themed gives no hot button
   (`TB_GETHOTITEM` -1); its focus stays on the toolbar itself.
-- A key gives a toolbar no items-only refresh (`schedule_items` would
-  remove its child windows in `tree_idle`), so a state changed from the
-  keyboard waits for the next whole tree.
 - Tooltip names need the hook DLL, so 32-bit targets get none.
 
 Controls:

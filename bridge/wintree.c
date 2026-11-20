@@ -423,8 +423,9 @@ static void CALLBACK refresh_items(HWND unused, UINT msg, UINT_PTR id, DWORD tim
 }
 
 /*
- * A key in list, tree or tab control hwnd may have scrolled it or
- * expanded an item: refresh only its items, unless the whole tree comes
+ * A key in list, tree, tab control or toolbar hwnd may have scrolled it,
+ * expanded an item or changed a button's state: refresh only its items
+ * (the windows on a toolbar stay, see tree_idle), unless the whole tree comes
  * anyway or another control waits for its items.
  */
 void schedule_items(HWND hwnd)

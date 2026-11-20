@@ -27,7 +27,11 @@
  *              separator, Bold (check), Wrap (check, checked), Undo
  *              (disabled, text from the string list) and Help, without
  *              text, named only by its tooltip (TTN_GETDISPINFOW); arrow
- *              keys move its hot button
+ *              keys move its hot button. Space on Bold sends its command
+ *              (without checking it), which enables Undo, as an editor's
+ *              first change would. A Static "Zoom 100 %" lies on
+ *              the toolbar, a window of its own like wordpad's font combo
+ *              boxes
  *   msctls_statusbar32 below it: "Ready", then "Level n %" while "Run"
  *              fills the bar (SB_SETTEXTW, no WinEvent)
  */
@@ -39,7 +43,7 @@
 
 enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_VOLUME,
        ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE, ID_STEP, ID_TOOLS, ID_NEW, ID_BOLD,
-       ID_WRAP, ID_UNDO, ID_HELP, ID_STATUS };
+       ID_WRAP, ID_UNDO, ID_HELP, ID_STATUS, ID_ZOOM };
 
 /* "Run" fills "Level:" from 0 to 100 in 20 s, as a long task would. */
 #define RUN_STEP 5
@@ -239,6 +243,7 @@ static void add_tools(HWND parent, int y)
     /* The list ends with two NULs. */
     buttons[4].iString = SendMessageW(tools, TB_ADDSTRINGW, 0, (LPARAM)L"Undo\0");
     SendMessageW(tools, TB_ADDBUTTONSW, ARRAYSIZE(buttons), (LPARAM)buttons);
+    add_control(tools, L"Static", L"Zoom 100 %", SS_LEFT, 330, 6, 80, 18, ID_ZOOM);
 }
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -308,6 +313,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             SendDlgItemMessageW(hwnd, ID_LEVEL, PBM_SETPOS, 0, 0);
             SetTimer(hwnd, ID_RUN, RUN_INTERVAL_MS, NULL);
         }
+        else if (LOWORD(wparam) == ID_BOLD)
+            SendDlgItemMessageW(hwnd, ID_TOOLS, TB_ENABLEBUTTON, ID_UNDO, TRUE);
         return 0;
     case WM_DESTROY:
         PostQuitMessage(0);

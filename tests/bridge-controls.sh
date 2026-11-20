@@ -19,7 +19,7 @@ wineserver -k; wineserver -w
 WINE_ATSPI_DEBUG=1 wine $BUILD/wine-atspi.exe.so --always-on > $BUILD/bridge.log 2>&1 &
 bridge=$!
 sleep 2
-python3 tests/atspi-events.py 41 > "$LOG" 2>&1 &
+python3 tests/atspi-events.py 44 > "$LOG" 2>&1 &
 events=$!
 sleep 1
 wine "$CONTROLS" &
@@ -55,9 +55,13 @@ sleep 2
 # Tab past "Close" to the toolbar: button 'New' in tool bar
 # (hot button 0); Right skips the separator to toggle 'Bold', Right
 # 'Wrap' (checked), Right skips the disabled 'Undo' to 'Help', Right
-# wraps to 'New', Left back to 'Help'.
+# wraps to 'New', Left back to 'Help'. Left skips 'Undo' to 'Wrap', Left
+# 'Bold'; Space sends its command, which enables 'Undo': the toolbar's
+# items are read again after the key, so 'Undo' gets sensitive and
+# enabled (state-changed) while the Static 'Zoom 100 %' on the toolbar
+# stays in the tree; Right 'Wrap', Right now stops at 'Undo'.
 # Escape closes the window.
-timeout 50 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
+timeout 55 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:down w:500 k:down w:500 \
     k:tab w:500 \
     k:tab w:500 k:down w:500 k:shift+down w:500 \
@@ -69,7 +73,8 @@ timeout 50 wine $BUILD/sendkeys.exe.so f:WineAtspiControls w:500 \
     k:tab w:500 k:right w:500 k:pgup w:500 k:end w:500 \
     k:tab w:500 k:up w:500 k:up w:500 k:down w:500 \
     k:tab w:500 k:space w:2500 k:tab w:500 k:tab w:500 \
-    k:right w:500 k:right w:500 k:right w:500 k:right w:500 k:left w:500
+    k:right w:500 k:right w:500 k:right w:500 k:right w:500 k:left w:500 \
+    k:left w:500 k:left w:500 k:space w:500 k:right w:500 k:right w:500
 python3 tests/atspi-dump.py controls > $BUILD/dump-running.log 2>&1
 timeout 10 wine $BUILD/sendkeys.exe.so k:escape w:1000
 

@@ -194,7 +194,9 @@ static void add_toolbar_items(struct tree_build *b, HWND hwnd)
 
 /*
  * A toolbar has no label; Wine's oleacc names it by its window text. Its
- * keys only move the hot button.
+ * keys move the hot button, and the command of Space or Return may change
+ * the state of other buttons (an Undo enabled), so its items are read
+ * again after a key; the windows on it stay (collect_tree_ids).
  */
 const struct item_handler toolbar_handler =
 {
@@ -203,5 +205,5 @@ const struct item_handler toolbar_handler =
     toolbar_describe_self,
     add_toolbar_items,
     TRUE,
-    FALSE,
+    TRUE,
 };
