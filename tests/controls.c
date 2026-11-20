@@ -34,6 +34,10 @@
  *              boxes
  *   msctls_statusbar32 below it: "Ready", then "Level n %" while "Run"
  *              fills the bar (SB_SETTEXTW, no WinEvent)
+ *   "Views:"   SysTabControl32 with TCS_BUTTONS: List, Details, Icons;
+ *              below "Sections:" but created last, so it ends the Tab
+ *              order (Shift+Tab from "Fruits:"). Arrow keys move only
+ *              its focus, the selection stays
  */
 
 #include <windows.h>
@@ -43,7 +47,7 @@
 
 enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_VOLUME,
        ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE, ID_STEP, ID_TOOLS, ID_NEW, ID_BOLD,
-       ID_WRAP, ID_UNDO, ID_HELP, ID_STATUS, ID_ZOOM };
+       ID_WRAP, ID_UNDO, ID_HELP, ID_STATUS, ID_ZOOM, ID_VIEWS };
 
 /* "Run" fills "Level:" from 0 to 100 in 20 s, as a long task would. */
 #define RUN_STEP 5
@@ -157,19 +161,19 @@ static void add_places(HWND parent, int y)
     add_place(tree, TVI_ROOT, L"Trash");
 }
 
-static void add_sections(HWND parent, int y)
+static void add_tabs(HWND parent, const WCHAR *label, DWORD style, int y, int h, int id,
+                     const WCHAR *const *names)
 {
-    static const WCHAR *const sections[] = { L"General", L"Advanced", L"About" };
     TCITEMW item = { 0 };
     HWND tabs;
     int i;
 
-    add_control(parent, L"Static", L"&Sections:", SS_LEFT, 10, y, 100, 20, 0);
-    tabs = add_control(parent, WC_TABCONTROLW, NULL, WS_TABSTOP, 120, y, 300, 60, ID_SECTIONS);
+    add_control(parent, L"Static", label, SS_LEFT, 10, y, 100, 20, 0);
+    tabs = add_control(parent, WC_TABCONTROLW, NULL, WS_TABSTOP | style, 120, y, 300, h, id);
     item.mask = TCIF_TEXT;
-    for (i = 0; i < ARRAYSIZE(sections); i++)
+    for (i = 0; names[i]; i++)
     {
-        item.pszText = (WCHAR *)sections[i];
+        item.pszText = (WCHAR *)names[i];
         SendMessageW(tabs, TCM_INSERTITEMW, i, (LPARAM)&item);
     }
 }
@@ -250,6 +254,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 {
     static const WCHAR *const fruits[] = { L"Apple", L"Banana", L"Cherry", NULL };
     static const WCHAR *const colors[] = { L"Red", L"Green", L"Blue", NULL };
+    static const WCHAR *const sections[] = { L"General", L"Advanced", L"About", NULL };
+    static const WCHAR *const views[] = { L"List", L"Details", L"Icons", NULL };
 
     switch (msg)
     {
@@ -259,7 +265,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         add_list(hwnd, L"&Colors:", LBS_EXTENDEDSEL, 170, ID_COLORS, colors);
         add_files(hwnd, 250);
         add_places(hwnd, 360);
-        add_sections(hwnd, 470);
+        add_tabs(hwnd, L"&Sections:", 0, 470, 32, ID_SECTIONS, sections);
         add_volume(hwnd, 540);
         add_count(hwnd, 620);
         add_control(hwnd, L"Button", L"Run", WS_TABSTOP | BS_PUSHBUTTON,
@@ -269,6 +275,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         add_control(hwnd, L"Static", L"Idle", SS_LEFT, 360, 663, 120, 20, ID_STEP);
         add_tools(hwnd, 700);
         add_control(hwnd, STATUSCLASSNAMEW, L"Ready", 0, 0, 0, 0, 0, ID_STATUS);
+        /* Last, so that it does not change the Tab order of the others. */
+        add_tabs(hwnd, L"Vie&ws:", TCS_BUTTONS, 505, 30, ID_VIEWS, views);
         return 0;
     case WM_TIMER:
     {

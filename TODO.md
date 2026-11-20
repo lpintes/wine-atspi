@@ -37,7 +37,6 @@ Controls:
   change; `tests/perf-text.sh`; 10 KB 1 ms). 32-bit targets (no hook)
   are still cut at `TEXT_MAX_CHARS`.
 - RichEdit: text attributes (`EM_GETCHARFORMAT`).
-- Tabs: `TCS_BUTTONS` untested.
 - 32-bit targets: a cross-process message costs about twice as much
   (tree of `tests/controls.c`: 162 messages, 420-530 ms against 210-250
   ms for the 64-bit build). Not looked into; measure where the time goes

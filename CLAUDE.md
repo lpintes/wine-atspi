@@ -240,6 +240,15 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   `TCS_BUTTONS` (`comctl32/tab.c`, `TAB_SetCurFocus`). The bridge reads
   the focused tab with `TCM_GETCURFOCUS`, its text with `TCM_GETITEMW`
   through memory in the target, and checks it after each key.
+  With `TCS_BUTTONS` Left / Right move only the focused tab, the
+  selection stays; no key selects (Space and Return are not handled,
+  `TCS_MULTISELECT` is not implemented), and `WM_KILLFOCUS` sets the
+  focused tab back to the selected one. Inserting the first tab
+  focuses it (`TAB_InsertItem`) and emits `EVENT_OBJECT_FOCUS` while
+  the window has no focus, so the bridge drops an item's focus event
+  from a window that does not have the focus (`is_stale_focus`), except
+  from a `ComboLBox`. `tests/bridge-tabs.sh` ("Views:" in
+  `tests/controls.c`, 2026-11-20).
 - After an arrow key in the Open dialog's file list the dialog thread is
   busy for 0.3 to over 0.5 s (WSL, folder on `/mnt/c`), so list view
   queries can time out; the key check retries a busy list.

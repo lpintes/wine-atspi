@@ -14,14 +14,26 @@
 static BOOL is_stale_focus(HWND hwnd, LONG id_object, LONG id_child)
 {
     GUITHREADINFO gti;
+    WCHAR cls[32];
 
-    if (id_object != OBJID_CLIENT || id_child != CHILDID_SELF)
+    if (id_object != OBJID_CLIENT)
         return FALSE;
     memset(&gti, 0, sizeof(gti));
     gti.cbSize = sizeof(gti);
     if (!GetGUIThreadInfo(GetWindowThreadProcessId(hwnd, NULL), &gti))
         return FALSE;
-    return gti.hwndFocus && gti.hwndFocus != hwnd;
+    if (id_child == CHILDID_SELF)
+        return gti.hwndFocus && gti.hwndFocus != hwnd;
+    /*
+     * An item's focus event comes from a control that need not have the
+     * focus: a TCS_BUTTONS tab control focuses its first tab when it is
+     * inserted (comctl32/tab.c, TAB_InsertItem -> TAB_SetCurFocus), while
+     * the window is still being created. A dropped combo box list
+     * (ComboLBox) keeps its events, the combo box has the focus then.
+     */
+    if (gti.hwndFocus == hwnd)
+        return FALSE;
+    return !GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, L"ComboLBox");
 }
 
 /*
