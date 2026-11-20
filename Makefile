@@ -17,7 +17,7 @@ export WINEPREFIX
 
 all: $(BUILD)/probe.exe.so $(BUILD)/sendkeys.exe.so $(BUILD)/controls.exe.so \
 	$(BUILD)/msgbox-race.exe.so $(BUILD)/wine-atspi.exe.so $(BUILD)/wine-atspi-hook.dll \
-	$(BUILD)/controls32.exe
+	$(BUILD)/controls32.exe $(BUILD)/browse.exe.so
 
 $(BUILD):
 	mkdir -p $@
@@ -101,6 +101,9 @@ $(BUILD)/controls32.exe: tests/controls.c | $(BUILD)
 
 $(BUILD)/msgbox-race.exe.so: tests/msgbox-race.c | $(BUILD)
 	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/msgbox-race.exe $< -lshell32
+
+$(BUILD)/browse.exe.so: tests/browse.c | $(BUILD)
+	$(WINEGCC) $(CFLAGS) $(WIN32_FLAGS) -o $(BUILD)/browse.exe $< -lshell32 -lole32 -luuid
 
 prefix:
 	test -d $(WINEPREFIX) || wineboot -i

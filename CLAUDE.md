@@ -679,10 +679,32 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   (`presentation_manager.py`) returns False for "event is None"; the
   following focus on the `Edit` does not interrupt either, because the
   old focus is a named ancestor. GTK 3 windows behave the same (debug
-  log, mate-terminal), although GTK sends `window:activate` before
-  `state-changed:active` and the bridge the other way round. Orca
-  interrupts on a key press. Not a bridge bug (2026-11-18, debug log
-  with `orca --debug-file`).
+  log, mate-terminal). Orca interrupts on a key press. Not a bridge bug
+  (2026-11-18, debug log with `orca --debug-file`).
+- The order of `window:activate` and `state-changed:active` matters for
+  a window of an application that was not active. `_on_active_changed`
+  calls `set_active_window(set_window_as_focus=True)`, which sets the
+  window as locus of focus before it switches to the window's script;
+  with no active script (the old application's `window:deactivate` left
+  none) the window is not spoken, and the focus that follows has it as
+  a named ancestor, so the dialog name was never heard (a folder picker
+  opened at start without an owner, as the Eureka A4 emulator does).
+  `_on_window_activated` switches the script first. So the bridge sends
+  `window:activate` before `state-changed:active` and
+  `window:deactivate` before the inactive state, as GTK 3 does
+  (`focus_idle` in `atspi.c`; confirmed with Orca on the emulator;
+  `tests/orca-browse.sh`, which runs Orca
+  with `--debug-file` and keeps its speech lines, 2026-11-20).
+- Wine's common item dialog (`IFileOpenDialog` with `FOS_PICKFOLDERS`,
+  `comdlg32/itemdlg.c`) starts in "File name:"; Tab goes to Open,
+  Cancel, the shell view's list view (a table, unnamed), then two
+  windows that take focus but show nothing (the `eb_navpane` splitter
+  of the explorer browser, `WS_TABSTOP` in `shell32/ebrowser.c`, and the
+  empty `idlg_container_pane` of custom controls, `WS_TABSTOP` in
+  `itemdlg.c`), where Orca is silent. The folder tree
+  (`NamespaceTreeControl`) is never reached from the keyboard. Return
+  in the list picks the current folder. Wine's, not the bridge's
+  (`tests/bridge-browse.sh`, 2026-11-20).
 
 Found with the bridge and notepad (`tests/bridge-notepad.sh`, 2026-11-06).
 

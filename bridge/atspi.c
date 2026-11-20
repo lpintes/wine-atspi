@@ -2212,17 +2212,24 @@ static gboolean focus_idle(gpointer data)
     else
         obj = get_node(app, &f->object, parent);
 
+    /*
+     * The window event before the state change, as GTK 3 sends them:
+     * Orca's handler of state-changed:active makes the window the locus
+     * of focus before it switches to the window's script, so a window of
+     * a newly active application would not be spoken; window:activate
+     * switches the script first (focus_manager.set_active_window).
+     */
     if (active_frame != frame)
     {
         if (active_frame)
         {
-            set_state(active_frame, BRIDGE_STATE_ACTIVE, FALSE);
             emit(active_frame, EVENT_WINDOW, "Deactivate", "", 0, 0,
                  g_variant_new_string(""));
+            set_state(active_frame, BRIDGE_STATE_ACTIVE, FALSE);
         }
         active_frame = frame;
-        set_state(frame, BRIDGE_STATE_ACTIVE, TRUE);
         emit(frame, EVENT_WINDOW, "Activate", "", 0, 0, g_variant_new_string(""));
+        set_state(frame, BRIDGE_STATE_ACTIVE, TRUE);
     }
     old = focused;
     if (old && old != obj)
