@@ -18,6 +18,14 @@ Window tree (object navigation, flat review):
 - `Action` for other objects than Win32 buttons (list items, tabs, combo
   boxes, toolbar buttons), if Orca's mouse click fallback is not good
   enough.
+- `describe_window` asks every class except `Static`, `Button`, `Edit`
+  and RichEdit for its name with `WM_GETTEXT` (`object.c`), which waits
+  for a busy target. A class whose text only `DefWindowProc` keeps
+  (`ListBox`, `SysListView32`, `SysTreeView32`, trackbar, tab control,
+  ...?) has it on the server, so `InternalGetWindowText` would do, as
+  for the frame (`get_frame_text`). Check per class in Wine's source
+  which ones handle `WM_SETTEXT` / `WM_GETTEXT` themselves; `ComboBox`
+  does (its text is the edit's).
 - A focused list without a focused item is described by MSAA in the
   focus but by `describe_container` in the tree, so its name or role may
   flip on each refresh. Not seen.
