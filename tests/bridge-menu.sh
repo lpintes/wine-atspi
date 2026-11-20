@@ -29,8 +29,9 @@ sleep 3
 # ancestor), Down moves on, with shortcuts. Right goes to the next menu
 # and its first item, again Right to the third. Escape closes the menu:
 # the bar item gets focus again; Escape again ends the menu and the Edit
-# gets focus back. Shift+F10 opens the Edit's context menu (nothing
-# highlighted until Down). Alt+Space opens the system menu.
+# gets focus back. Shift+F10 opens the Edit's context menu: the menu
+# itself gets focus (nothing highlighted until Down), then its items.
+# Alt+Space opens the system menu.
 timeout 60 wine $BUILD/sendkeys.exe.so f:Notepad w:500 \
     t:"Hello" w:500 \
     k:f10 w:700 k:down w:700 k:down w:700 k:down w:700 \

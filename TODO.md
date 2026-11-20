@@ -47,8 +47,6 @@ Controls:
   (WoW64 message thunks, `VirtualAllocEx` / `ReadProcessMemory`).
 - Console: a full buffer (150 rows) shifts lines up, so the diff gives
   one huge delete + insert; wide (CJK) cells untested.
-- Menus: the `Edit` context menu (Shift+F10) is silent until the first
-  arrow (`TPM_NONOTIFY`, nothing highlighted).
 
 ## 3. Later
 

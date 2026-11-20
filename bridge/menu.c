@@ -106,6 +106,16 @@ static void report_menu_item(const struct menu_record *rec)
         focus.ancestor_count = depth - 1;
     }
     obj->shortcut = depth && shortcut[0] ? shortcut : NULL;
+    if (rec->event == MENU_EVENT_OPEN)
+    {
+        /*
+         * A context menu with nothing highlighted: the menu itself has
+         * focus. Its count is of its items, not its siblings, so it gets
+         * no position.
+         */
+        obj->states |= BRIDGE_STATE_BIT(BRIDGE_STATE_FOCUSABLE);
+        goto post;
+    }
     if (rec->has_submenu)
         obj->role = BRIDGE_ROLE_MENU;
     else if (rec->type & MFT_RADIOCHECK)
@@ -124,6 +134,7 @@ static void report_menu_item(const struct menu_record *rec)
     obj->position = rec->position;
     obj->set_size = rec->count;
 
+post:
     describe_frame(top, &focus.frame, &str);
     describe_labels(top, &focus, &str);
     focus.pid = pid;

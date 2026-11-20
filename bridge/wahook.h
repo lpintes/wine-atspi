@@ -24,6 +24,7 @@ enum menu_event
 {
     MENU_EVENT_SELECT = 1,  /* item highlighted, or current again after its submenu closed */
     MENU_EVENT_END = 2,     /* menu mode ended */
+    MENU_EVENT_OPEN = 3,    /* root popup shown, nothing highlighted yet; depth 0 */
 };
 
 enum menu_kind

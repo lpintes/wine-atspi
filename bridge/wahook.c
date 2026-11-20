@@ -96,6 +96,26 @@ static BOOL is_system_wrapper(HMENU menu)
     return GetMenuItemCount(menu) == 1 && GetSubMenu(menu, 0) != NULL;
 }
 
+/* Items of menu that are no separators; *position gets the one at pos, from 1. */
+static INT32 count_items(HMENU menu, int pos, INT32 *position)
+{
+    MENUITEMINFOW mii;
+    WCHAR text[MENU_TEXT_MAX];
+    int count = GetMenuItemCount(menu), i;
+    INT32 n = 0;
+
+    *position = 0;
+    for (i = 0; i < count; i++)
+    {
+        if (!get_item(menu, i, &mii, text) || (mii.fType & MFT_SEPARATOR))
+            continue;
+        n++;
+        if (i <= pos)
+            *position = n;
+    }
+    return n;
+}
+
 /*
  * Reports the item at pos of menu as highlighted. The path up to the root
  * menu comes from open_menus.
@@ -108,7 +128,7 @@ static void send_select(HWND owner, HMENU menu, UINT pos, UINT32 kind)
     /* From the item up: menu and position of each level. */
     HMENU menus[MAX_OPEN + 1];
     UINT positions[MAX_OPEN + 1];
-    int n = 0, i, level, count;
+    int n = 0, i, level;
 
     memset(&rec, 0, sizeof(rec));
     if (!get_item(menu, pos, &mii, text))
@@ -138,15 +158,7 @@ static void send_select(HWND owner, HMENU menu, UINT pos, UINT32 kind)
         get_item(menus[i], positions[i], &mii, rec.texts[level]);
     }
 
-    count = GetMenuItemCount(menu);
-    for (i = 0; i < count; i++)
-    {
-        if (!get_item(menu, i, &mii, text) || (mii.fType & MFT_SEPARATOR))
-            continue;
-        rec.count++;
-        if (i <= (int)pos)
-            rec.position = rec.count;
-    }
+    rec.count = count_items(menu, pos, &rec.position);
     send_record(&rec);
 }
 
@@ -180,6 +192,39 @@ static int item_position(HMENU menu, UINT item, UINT flags)
             first = i;
     }
     return first;
+}
+
+/*
+ * A menu window (#32768) is shown. TrackPopupMenu highlights nothing,
+ * and with TPM_NONOTIFY (the Edit's context menu, user32/edit.c) sends
+ * no WM_ENTERMENULOOP or WM_INITMENUPOPUP either, so the first
+ * WM_MENUSELECT comes only with the first arrow key. Report a root popup
+ * when it opens. A popup that a highlighted item opened (submenu, menu
+ * bar) is left to the WM_MENUSELECT of its items.
+ */
+static void on_popup_shown(HWND popup)
+{
+    struct menu_record rec;
+    WCHAR cls[16];
+    HMENU menu;
+    HWND owner;
+    int i;
+
+    if (!GetClassNameW(popup, cls, ARRAYSIZE(cls)) || lstrcmpW(cls, L"#32768") ||
+        !(menu = (HMENU)SendMessageW(popup, MN_GETHMENU, 0, 0)))
+        return;
+    if (menu_thread != GetCurrentThreadId())
+        reset();
+    if (last_menu || ((i = find_open(menu)) >= 0 && open_menus[i].parent))
+        return;
+    if (!(owner = GetWindow(popup, GW_OWNER)) && !(owner = GetFocus()))
+        return;
+    memset(&rec, 0, sizeof(rec));
+    rec.event = MENU_EVENT_OPEN;
+    rec.kind = MENU_KIND_POPUP;
+    rec.owner = (ULONG_PTR)owner;
+    rec.count = count_items(menu, -1, &rec.position);
+    send_record(&rec);
 }
 
 static UINT32 menu_kind(HWND owner, HMENU menu, UINT flags)
@@ -477,6 +522,10 @@ __declspec(dllexport) LRESULT CALLBACK CallWndProc(int code, WPARAM wp, LPARAM l
         case WM_UNINITMENUPOPUP:
         case WM_MENUSELECT:
             on_message(cwp->hwnd, cwp->message, cwp->wParam, cwp->lParam);
+            break;
+        case WM_WINDOWPOSCHANGED:
+            if (((const WINDOWPOS *)cwp->lParam)->flags & SWP_SHOWWINDOW)
+                on_popup_shown(cwp->hwnd);
             break;
         }
     }

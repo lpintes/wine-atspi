@@ -914,8 +914,15 @@ Wine 11.21, 2026-11-08).
   `&Otvoriť...\tCtrl+O`.
 - The Edit's context menu (Shift+F10) uses `TPM_NONOTIFY`
   (`user32/edit.c`): only `WM_MENUSELECT` and `WM_EXITMENULOOP`, and
-  nothing is highlighted until the first arrow key, so it is silent until
-  then.
+  nothing is highlighted until the first arrow key. `TrackPopupMenu`
+  highlights nothing without `TPM_NONOTIFY` either. Each menu window
+  (`#32768`) is shown by `SetWindowPos` with `SWP_SHOWWINDOW`
+  (`show_popup` in `win32u/menu.c`), so the hook sees its
+  `WM_WINDOWPOSCHANGED`, gets the menu with `MN_GETHMENU` and, for a
+  root popup (no item highlighted yet, not opened from a known item),
+  reports `MENU_EVENT_OPEN`: the unnamed menu itself gets focus, then
+  its items as usual (`on_popup_shown` in `wahook.c`,
+  `tests/bridge-menu.sh`, 2026-11-20; not yet heard with Orca).
 - Wine's system menu (Alt+Space, or Left of the first bar item) hangs
   below a wrapper menu with one empty `MF_SYSMENU` item; its items carry
   `MF_SYSMENU`. The hook leaves the wrapper level out; the system menu
