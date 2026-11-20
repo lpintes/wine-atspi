@@ -247,8 +247,15 @@ Found with the bridge spike (`bridge/`, `tests/atspi-dump.py`, Wine 11.21,
   `SendMessageW` (`dlls/oleacc/main.c`, `client.c`), so MSAA on a busy
   target blocks the bridge. For a whole window of a class with a known
   role `describe_object` skips MSAA and does what `oleacc` would
-  (`describe_window`: name from `WM_GETTEXT` with a timeout, an `Edit`
-  named by its `Static` as in `edit_find_label`, states from the style);
+  (`describe_window`: name from the window text, an `Edit` named by its
+  `Static` as in `edit_find_label`, states from the style). Of those
+  classes only `ComboBox` (`user32/combo.c`, `comctl32_v6/combo.c`),
+  `ComboBoxEx32` and `msctls_statusbar32` handle `WM_GETTEXT`
+  themselves and are asked with a timeout; the others (`Static`,
+  `Button`, `ListBox` in user32 and `comctl32_v6`, list view, tree view,
+  tab control, toolbar, trackbar, progress bar, up-down, scroll bar)
+  leave the text to `DefWindowProc`, so it is read from the server with
+  `InternalGetWindowText` (`get_class_text` in `object.c`, 2026-11-20);
   other classes ask with `WM_NULL` and a timeout before MSAA. The gain
   in time is small (35 objects 190 -> 182 ms): the cost per window is
   the cross-process messages. All messages go through `send_message`

@@ -99,6 +99,29 @@ static BOOL is_combo_class(const WCHAR *cls)
 }
 
 /*
+ * Window text of a standard control of class cls. Of the classes in
+ * role_from_class only the combo boxes (user32/combo.c,
+ * comctl32_v6/combo.c, comctl32/comboex.c) and the status bar
+ * (comctl32/status.c) handle WM_GETTEXT themselves; the others leave
+ * their text to DefWindowProc, which keeps it on the server, so
+ * InternalGetWindowText reads it without a message and a busy target
+ * does not wait. FALSE if the message timed out.
+ */
+static BOOL get_class_text(HWND hwnd, const WCHAR *cls, WCHAR *buf, int len)
+{
+    buf[0] = 0;
+    if (!is_combo_class(cls) && lstrcmpiW(cls, L"msctls_statusbar32"))
+    {
+        InternalGetWindowText(hwnd, buf, len);
+        return TRUE;
+    }
+    if (!send_message(hwnd, WM_GETTEXT, len, (LPARAM)buf, SEND_TIMEOUT_MS, NULL))
+        return FALSE;
+    buf[len - 1] = 0;
+    return TRUE;
+}
+
+/*
  * The outermost combo box that hwnd is part of, e.g. the ComboBoxEx32
  * around the ComboBox around the Open dialog's file name Edit; NULL if
  * the parent of hwnd is no combo box.
@@ -400,11 +423,10 @@ static BOOL describe_window(HWND hwnd, const WCHAR *cls, struct bridge_object *o
     }
     else
     {
-        if (!send_message(hwnd, WM_GETTEXT, ARRAYSIZE(buf), (LPARAM)buf, SEND_TIMEOUT_MS, NULL))
+        if (!get_class_text(hwnd, cls, buf, ARRAYSIZE(buf)))
             return FALSE;
-        buf[ARRAYSIZE(buf) - 1] = 0;
         /* A combo box's text becomes its value, see describe_object. */
-        if (lstrcmpiW(cls, L"ComboBox") && lstrcmpiW(cls, L"ComboBoxEx32"))
+        if (!is_combo_class(cls))
             strip_ampersands(buf);
     }
     if (buf[0])
@@ -558,7 +580,12 @@ void describe_container(HWND hwnd, struct bridge_object *obj, struct focus_strin
     obj->hwnd = (ULONG_PTR)hwnd;
     obj->window_class = str->object_class;
     if (handler->named_by_text)
-        get_window_text(hwnd, str->container, sizeof(str->container));
+    {
+        WCHAR buf[NAME_MAX_UTF8 / 3];
+
+        get_class_text(hwnd, cls, buf, ARRAYSIZE(buf));
+        to_utf8(buf, str->container, sizeof(str->container));
+    }
     else
         find_label(hwnd, str->container, sizeof(str->container));
     obj->name = str->container;
