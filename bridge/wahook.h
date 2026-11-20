@@ -4,7 +4,8 @@
  * from another process (GetMenuItemInfo fails with error 1400), so the
  * hook reads them where they live. Toolbar tooltips are asked for the
  * same way (TOOLTIP_MESSAGE), and so is the text of edit controls
- * (TEXT_MESSAGE).
+ * (TEXT_MESSAGE). Changes of a status bar are posted to the bridge
+ * (STATUS_MESSAGE).
  *
  * Windows headers only; included by the hook DLL and the Win32 core.
  * Fixed-size fields, so a 32-bit hook can talk to the 64-bit bridge.
@@ -104,5 +105,15 @@ struct text_request
     UINT32 sel_start;       /* out: EM_GETSEL */
     UINT32 sel_end;
 };
+
+/*
+ * Registered message that the hook posts to the record sink when a
+ * status bar of the target is about to change its text (SB_SETTEXT,
+ * SB_SETPARTS, SB_SIMPLE, WM_SETTEXT). Wine's comctl32 emits no WinEvent
+ * then (status.c). wParam is the status bar window, lParam 0. The hook
+ * sees the message before the status bar handles it, so the bridge reads
+ * the text a little later.
+ */
+#define STATUS_MESSAGE L"WineAtspiStatus"
 
 #endif

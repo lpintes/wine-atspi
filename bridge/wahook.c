@@ -5,7 +5,8 @@
  * that Wine sends to the menu owner and reports each highlighted item to
  * the bridge as a struct menu_record (wahook.h) by WM_COPYDATA. It also
  * answers the bridge's TOOLTIP_MESSAGE for toolbar buttons and TEXT_MESSAGE
- * for the text of Edit and RichEdit controls.
+ * for the text of Edit and RichEdit controls, and posts STATUS_MESSAGE when
+ * a status bar changes.
  *
  * Built with mingw, not winegcc: a Winelib DLL cannot be loaded into a
  * PE process.
@@ -422,6 +423,29 @@ static void answer_text(HWND hwnd, struct text_request *req)
     req->tag = TEXT_REPLY_TAG;
 }
 
+/*
+ * A status bar is about to change its text: tell the bridge
+ * (STATUS_MESSAGE in wahook.h). Posted, so the target does not wait.
+ */
+static void post_status(HWND hwnd)
+{
+    static UINT status_message;
+    WCHAR cls[32];
+    HWND sink;
+    DWORD pid = 0;
+
+    if (!GetClassNameW(hwnd, cls, ARRAYSIZE(cls)) || lstrcmpiW(cls, STATUSCLASSNAMEW))
+        return;
+    if (!status_message)
+        status_message = RegisterWindowMessageW(STATUS_MESSAGE);
+    if (!status_message || !(sink = FindWindowW(MENU_SINK_CLASS, NULL)))
+        return;
+    GetWindowThreadProcessId(sink, &pid);
+    if (pid == GetCurrentProcessId())
+        return;
+    PostMessageW(sink, status_message, (WPARAM)hwnd, 0);
+}
+
 __declspec(dllexport) LRESULT CALLBACK CallWndProc(int code, WPARAM wp, LPARAM lp)
 {
     static UINT tooltip_message, text_message;
@@ -440,6 +464,13 @@ __declspec(dllexport) LRESULT CALLBACK CallWndProc(int code, WPARAM wp, LPARAM l
             answer_text(cwp->hwnd, (struct text_request *)cwp->lParam);
         switch (cwp->message)
         {
+        case SB_SETTEXTA:
+        case SB_SETTEXTW:
+        case SB_SETPARTS:
+        case SB_SIMPLE:
+        case WM_SETTEXT:
+            post_status(cwp->hwnd);
+            break;
         case WM_ENTERMENULOOP:
         case WM_EXITMENULOOP:
         case WM_INITMENUPOPUP:

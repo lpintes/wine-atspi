@@ -379,7 +379,7 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
     {
         /* A key often changes the status bar, e.g. regedit's key path. */
         if (list != LIST_BUSY)
-            report_status_bar(GetAncestor(hwnd, GA_ROOT));
+            check_status_bar(GetAncestor(hwnd, GA_ROOT));
         return;
     }
     memset(&obj, 0, sizeof(obj));
@@ -391,7 +391,7 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
             key_timer = SetTimer(NULL, 0, KEY_CHECK_DELAY_MS, check_after_key);
             return;
         }
-        report_status_bar(GetAncestor(hwnd, GA_ROOT));
+        check_status_bar(GetAncestor(hwnd, GA_ROOT));
         return;
     }
     /*
@@ -411,7 +411,7 @@ void CALLBACK check_after_key(HWND unused, UINT msg, UINT_PTR id, DWORD time)
           GetTickCount() - start);
     atspi_post_update(last_focus.pid, &obj);
     free_strings(&str);
-    report_status_bar(GetAncestor(hwnd, GA_ROOT));
+    check_status_bar(GetAncestor(hwnd, GA_ROOT));
 }
 
 /*
@@ -486,9 +486,7 @@ void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         if (id_object == OBJID_WINDOW && id_child == CHILDID_SELF)
         {
             atspi_post_window_gone((ULONG_PTR)hwnd);
-            /* Shown again, it is reported again. */
-            if (hwnd == last_status.hwnd)
-                last_status.hwnd = NULL;
+            status_window_shown(hwnd, FALSE);
             if (hwnd == tree_top)
                 tree_top = NULL;
             else if (event == EVENT_OBJECT_HIDE)
@@ -499,7 +497,11 @@ void CALLBACK win_event_proc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
     case EVENT_OBJECT_LOCATIONCHANGE:
     case EVENT_OBJECT_NAMECHANGE:
         if (id_object == OBJID_WINDOW && id_child == CHILDID_SELF)
+        {
             schedule_tree(hwnd);
+            if (event == EVENT_OBJECT_SHOW)
+                status_window_shown(hwnd, TRUE);
+        }
         break;
     }
 }
@@ -523,7 +525,7 @@ void forget_focus(void)
     key_retries = busy_focus_retries = 0;
     memset(&pending_focus, 0, sizeof(pending_focus));
     memset(&last_focus, 0, sizeof(last_focus));
-    last_status.hwnd = NULL;
+    forget_status();
     forget_tree();
     forget_menu();
 }

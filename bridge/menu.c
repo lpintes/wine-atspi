@@ -193,8 +193,16 @@ BOOL still_in_menu(void)
 /* Window procedure of the hidden window that gets the hook's records. */
 static LRESULT CALLBACK menu_sink_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
+    static UINT status_message;
     const COPYDATASTRUCT *cds = (const COPYDATASTRUCT *)lparam;
 
+    if (!status_message)
+        status_message = RegisterWindowMessageW(STATUS_MESSAGE);
+    if (msg == status_message && status_message)
+    {
+        on_status_notice((HWND)wparam);
+        return 0;
+    }
     if (msg != WM_COPYDATA)
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     if (cds->dwData != MENU_RECORD_TAG || cds->cbData != sizeof(struct menu_record))

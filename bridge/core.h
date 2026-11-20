@@ -43,6 +43,12 @@
 #define SEND_TIMEOUT_MS 500
 /* A status bar is read after each key: do not wait long for a busy target. */
 #define STATUS_TIMEOUT_MS 100
+/*
+ * A status bar is read this long after the hook told of a change, so
+ * that the parts set together come in one read; retried while busy.
+ */
+#define STATUS_SETTLE_MS 30
+#define STATUS_RETRIES 5
 
 /* UTF-8 buffers backing the strings of one bridge_focus. */
 struct focus_strings
@@ -299,8 +305,11 @@ int console_text_extents(HWND hwnd, const unsigned int *chars, int count,
                          int start, int end, int *rect);
 
 /* statusbar.c */
-extern struct status_state last_status;
-void report_status_bar(HWND top);
+BOOL report_status_bar(HWND top);
+void check_status_bar(HWND top);
+void on_status_notice(HWND hwnd);
+void status_window_shown(HWND hwnd, BOOL shown);
+void forget_status(void);
 
 /* wintree.c */
 extern HWND tree_top;
@@ -334,6 +343,9 @@ extern struct menu_state menu;
 BOOL still_in_menu(void);
 HHOOK install_menu_hook(void);
 void forget_menu(void);
+
+/* main.c */
+BOOL hook_dll_installed(void);
 
 /* keys.c */
 LRESULT CALLBACK keyboard_proc(int code, WPARAM wparam, LPARAM lparam);

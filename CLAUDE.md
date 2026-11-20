@@ -479,9 +479,18 @@ Orca 51.1 (`/usr/lib/python3.14/site-packages/orca/` in Arch WSL,
   (`comctl32/status.c`). `SB_GETPARTS`, `SB_ISSIMPLE` and
   `SB_GETTEXTLENGTHW` work across processes, `SB_GETTEXTW` needs memory
   in the target. The bridge reads the status bar on each focus change
-  and after each key and puts it below the frame as one object with the
-  text of all parts joined by spaces, as NVDA does (`report_status_bar`).
-  Confirmed with Orca on regedit (2026-11-08); `tests/bridge-statusbar.sh`.
+  and puts it below the frame as one object with the text of all parts
+  joined by spaces, as NVDA does (`report_status_bar`). Confirmed with
+  Orca on regedit (2026-11-08). A read costs about 7 ms (2026-11-19), so
+  it is not done after each key: the hook DLL sees `SB_SETTEXTA/W`,
+  `SB_SETPARTS`, `SB_SIMPLE` and `WM_SETTEXT` sent to a status bar
+  (before the status bar handles them) and posts the registered
+  `STATUS_MESSAGE` to the bridge, which reads the status bar of the
+  focus's window 30 ms later (`post_status` in `wahook.c`,
+  `on_status_notice`). This also follows changes without a key (a
+  progress text). A 32-bit target or a missing hook DLL is still read
+  after each key (`check_status_bar`). `tests/bridge-statusbar.sh`
+  (regedit keys; `tests/controls.c` "Run" without a key, 2026-11-20).
 - An up-down (`msctls_updown32`) never has focus: it subclasses its
   buddy `Edit` and handles the buddy's Up and Down keys (Wine: no Page keys)
   (`comctl32/updown.c`, `UPDOWN_Buddy_SubclassProc`). Those keys change

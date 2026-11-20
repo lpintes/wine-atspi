@@ -28,6 +28,8 @@
  *              (disabled, text from the string list) and Help, without
  *              text, named only by its tooltip (TTN_GETDISPINFOW); arrow
  *              keys move its hot button
+ *   msctls_statusbar32 below it: "Ready", then "Level n %" while "Run"
+ *              fills the bar (SB_SETTEXTW, no WinEvent)
  */
 
 #include <windows.h>
@@ -37,7 +39,7 @@
 
 enum { ID_FRUITS = 100, ID_EMPTY, ID_COLORS, ID_FILES, ID_PLACES, ID_SECTIONS, ID_VOLUME,
        ID_LEVEL, ID_COUNT, ID_COUNT_SPIN, ID_RUN, ID_CLOSE, ID_STEP, ID_TOOLS, ID_NEW, ID_BOLD,
-       ID_WRAP, ID_UNDO, ID_HELP };
+       ID_WRAP, ID_UNDO, ID_HELP, ID_STATUS };
 
 /* "Run" fills "Level:" from 0 to 100 in 20 s, as a long task would. */
 #define RUN_STEP 5
@@ -261,6 +263,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                     240, 660, 100, 25, ID_CLOSE);
         add_control(hwnd, L"Static", L"Idle", SS_LEFT, 360, 663, 120, 20, ID_STEP);
         add_tools(hwnd, 700);
+        add_control(hwnd, STATUSCLASSNAMEW, L"Ready", 0, 0, 0, 0, 0, ID_STATUS);
         return 0;
     case WM_TIMER:
     {
@@ -269,6 +272,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         WCHAR step[32];
 
         SendMessageW(bar, PBM_SETPOS, pos, 0);
+        wsprintfW(step, L"Level %d %%", pos);
+        SendDlgItemMessageW(hwnd, ID_STATUS, SB_SETTEXTW, 0, (LPARAM)step);
         wsprintfW(step, L"Step %d of %d", pos / RUN_STEP, 100 / RUN_STEP);
         if (pos >= 100)
         {
@@ -329,7 +334,7 @@ int main(void)
     wc.lpszClassName = CLASS_NAME;
     RegisterClassW(&wc);
     hwnd = CreateWindowExW(0, CLASS_NAME, L"Controls", WS_OVERLAPPEDWINDOW,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 780, NULL, NULL,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 460, 800, NULL, NULL,
                            wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOW);
     while (GetMessageW(&msg, NULL, 0, 0) > 0)

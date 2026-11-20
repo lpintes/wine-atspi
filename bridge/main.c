@@ -58,6 +58,11 @@ static struct
     HHOOK keyboard, menu;
 } hooks;
 
+BOOL hook_dll_installed(void)
+{
+    return hooks.menu != NULL;
+}
+
 void bridge_set_listening(int listening)
 {
     /* Called on the AT-SPI thread; the main thread has its queue already. */
